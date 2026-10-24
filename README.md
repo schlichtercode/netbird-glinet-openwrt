@@ -45,7 +45,8 @@ opkg update && opkg install netbird-glinet
 ```
 
 - Needs ~50 MB free flash and internet access on the router; dependencies `curl` and `lua` are part of GL.iNet firmware.
-- **Upgrade:** *Upgrade* in the panel or `opkg update && opkg upgrade netbird-glinet`. `/etc/config/netbird` is a conffile — your settings survive, and so does the enrollment in `/etc/netbird/`.
+- **Upgrade:** *Upgrade* in the panel or `opkg update && opkg upgrade netbird-glinet`. `/etc/config/netbird` is a conffile — your settings survive (opkg's `netbird-opkg` copy of the template is removed by `postinst`), and so does the enrollment in `/etc/netbird/`.
+- **Already installed with `install.sh`?** Installing the package on top is safe: files are identical, the config is kept, and the binary is only downloaded when the version differs (tested on the Opal: 41 s, no download).
 - **Remove:** `opkg remove netbird-glinet` (keeps `/etc/netbird` and `/etc/config/netbird`; delete those by hand for a full purge). `uninstall.sh` notices an opkg install and hands over to `opkg remove`.
 - **After a GL firmware update** that kept your settings, GL's original `vpn-client` object and dashboard bundle are back: run `/usr/libexec/netbird/setup-router.sh install --no-fetch` (or reinstall the package).
 - **Change the pinned NetBird version:** `netbird-fetch-binary --version 0.77.1` (the package default is in `/usr/share/netbird-glinet/netbird-release`).

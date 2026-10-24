@@ -41,9 +41,18 @@
       `install.sh --probe` läuft mit dem Umbau; Skripte mit der BusyBox-ash des Routers `sh -n`-geprüft.
 - [ ] GitHub: Repo-Settings → Pages → Source „GitHub Actions“ aktivieren, dann ersten Tag `v0.1.0` pushen und den
       Workflow-Lauf prüfen (Pages-URL, Release-Asset).
-- [ ] Auf dem Opal (nur nach Rückfrage, vorher `MemAvailable` prüfen): Feed im Panel eintragen, `opkg update`,
-      `opkg install netbird-glinet` über eine bestehende install.sh-Installation — erwartet: Config bleibt (preinst/postinst),
-      Binary-Version passt ⇒ kein Download, Dienst läuft, nginx-Restart verzögert. Danach `opkg remove` + `install.sh` testen.
+- [x] **2026-10-25 00:15 auf dem Opal getestet:** `opkg install /root/netbird-glinet_0.0.0+git16b0ebf-1_all.ipk`
+      über die bestehende install.sh-Installation (MemAvailable vorher 31,7 MB). Ergebnis: 41 s, rc=0, 29 Dateien
+      verwaltet, `/etc/config/netbird` byteidentisch (md5 8490dc44…), Binary 0.81.4 erkannt ⇒ kein Download, Dienst
+      gestartet (`mgmt=Connected`, `wg=kernel`, RSS 27 MB, MemAvailable danach 24 MB), nginx verzögert neu gestartet
+      (3 Prozesse, keine Waisen), Panel HTTP 200. opkg hat die unverwaltete Config selbst geschont und das Template als
+      `/etc/config/netbird-opkg` abgelegt ⇒ `postinst` löscht diese Datei jetzt (auf dem Router manuell entfernt).
+- [ ] Noch nicht getestet: `opkg remove netbird-glinet` (prerm → `setup-router.sh uninstall --keep-files`), Upgrade auf eine
+      neuere Paketversion (prerm `upgrade`), Installation über die GL-Paketseite mit echtem Feed.
+- [ ] **Nebenbefund:** Vor der Installation war der Daemon seit 23:48 down (`hold-until` 23:48:34 längst abgelaufen),
+      der Watchdog loggte 25 min lang nur „daemon socket missing (procd will respawn)“ ohne Neustart. Watchdog sollte
+      nach N Intervallen ohne Socket `/etc/init.d/netbird restart` auslösen; Ursache (procd respawn erschöpft? run-daemon
+      hängt?) per `ubus call service list '{"name":"netbird"}'` prüfen.
 - [ ] Offen: Verhalten der GL-Paketseite bei mehrminütigem `postinst` (Timeout?) — ggf. Download in den Hintergrund
       (procd-Instanz) verlagern.
 - [ ] `install.sh --skip-binary` gegen den Router laufen lassen (nutzt jetzt `setup-router.sh`), danach Panel neu laden.
