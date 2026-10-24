@@ -3,9 +3,9 @@
     "view": "netbird",
     "title": "NetBird",
     "level": 2,
-    "parent": "applications",
-    "parent_icon": "application",
-    "parent_index": 55,
+    "parent": "vpn",
+    "parent_icon": "vpn",
+    "parent_index": 40,
     "show_mode": [
         "router",
         "wds",

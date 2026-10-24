@@ -103,6 +103,24 @@
         "msg_saved": "Ajustes guardados",
         "msg_saved_restart": "Ajustes guardados — reiniciando NetBird",
         "action_done": "Hecho",
-        "action_failed": "Falló"
+        "action_failed": "Falló",
+        "hw_switch": "El interruptor físico controla NetBird",
+        "hw_switch_hint": "Si el interruptor está en «Cliente VPN» en Sistema → Configuración del interruptor, también enciende y apaga NetBird.",
+        "networks_title": "Redes y nodos de salida",
+        "networks_hint": "Rutas y nodos de salida que tu servidor de gestión ofrece a este router. Activa uno para enrutar a través de él; los clientes LAN lo siguen automáticamente.",
+        "networks_disabled_hint": "Las rutas de cliente están desactivadas en Ajustes avanzados — actívalas para usar redes y nodos de salida.",
+        "network": "Red",
+        "network_range": "Rango / dominios",
+        "network_active": "Activa",
+        "no_networks": "No se ofrecen redes",
+        "exit_node_tag": "nodo de salida",
+        "exit_preferred": "preferido",
+        "exit_set_preferred": "Usar con el interruptor",
+        "net_selected": "Red activada",
+        "net_deselected": "Red desactivada",
+        "hw_switch_mode": "Función del interruptor",
+        "hw_switch_mode_hint": "Qué controla el interruptor físico cuando está en «Cliente VPN».",
+        "hw_mode_service": "NetBird encendido / apagado",
+        "hw_mode_exitnode": "Nodo de salida preferido encendido / apagado"
     }
 }

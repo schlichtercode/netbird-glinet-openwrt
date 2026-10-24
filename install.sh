@@ -221,6 +221,10 @@ fi
 
 # ── 4. Files ──────────────────────────────────────────────────────────────────
 say "Installing service, watchdog and admin-panel page…"
+# nginx workers cache the Lua RPC object; a changed object needs an nginx
+# restart (not reload: old workers linger behind the panel's websocket and
+# eat 15 MB each on a 128 MB router). Only do it when the file changed.
+RPC_MD5_BEFORE=$(rssh 'md5sum /usr/lib/oui-httpd/rpc/netbird 2>/dev/null | cut -d" " -f1')
 rssh 'mkdir -p /usr/libexec/netbird /usr/lib/oui-httpd/rpc /usr/share/gl-validator.d /usr/share/oui/menu.d /www/views /www/i18n /etc/netbird /var/log/netbird'
 ( cd "$FILES" && COPYFILE_DISABLE=1 tar --format ustar --uid 0 --gid 0 --uname root --gname root -cf - \
     --exclude='./etc/config/netbird' --exclude='./www/views/*.js' --exclude='.DS_Store' --exclude='._*' . ) \
@@ -265,10 +269,25 @@ fi
 exit 0
 REMOTE
 
+# ── 5b. Hardware toggle switch: hook into GL's "VPN client" switch function ──
+# /etc/gl-switch.d/vpn.sh is GL.iNet's handler; we append two lines (kept
+# across re-runs, removed by uninstall.sh, re-applied after a firmware update).
+rssh 'f=/etc/gl-switch.d/vpn.sh
+if [ -f "$f" ] && ! grep -q "netbird/switch.sh" "$f"; then
+    cp "$f" "$f.pre-netbird"
+    printf "\n# netbird-glinet-openwrt: let the switch also control NetBird (uninstall.sh removes this)\n[ -x /usr/libexec/netbird/switch.sh ] && /usr/libexec/netbird/switch.sh \"\$1\"\n" >> "$f"
+    echo "   hooked /etc/gl-switch.d/vpn.sh (backup: $f.pre-netbird)"
+fi'
+ok "hardware switch: NetBird follows the \"VPN client\" switch function"
+
 # ── 6. Enable + start, reload nginx (panel picks up the RPC object + menu) ────
 say "Enabling and starting the service…"
 rssh '/etc/init.d/netbird enable; /etc/init.d/netbird restart' >/dev/null 2>&1 || warn "service restart returned an error — check: ssh $ROUTER logread -e netbird"
-rssh 'command -v nginx >/dev/null 2>&1 && (nginx -s reload 2>/dev/null || /etc/init.d/nginx reload 2>/dev/null); true'
+RPC_MD5_AFTER=$(rssh 'md5sum /usr/lib/oui-httpd/rpc/netbird 2>/dev/null | cut -d" " -f1')
+if [ "$RPC_MD5_BEFORE" != "$RPC_MD5_AFTER" ]; then
+    rssh '[ -x /etc/init.d/nginx ] && /etc/init.d/nginx restart >/dev/null 2>&1; true'
+    ok "nginx restarted (RPC object changed) — reload the panel page"
+fi
 sleep 3
 STATE=$(rssh '. /usr/libexec/netbird/common.sh; nb_load_config; echo "daemon=$(nb_daemon_count) mgmt=$(nb_mgmt_state) wg=$(nb_wg_mode) rss=$(nb_daemon_rss_kb)kB avail=$(nb_mem_available_kb)kB"' 2>/dev/null || true)
 ok "service state: $STATE"

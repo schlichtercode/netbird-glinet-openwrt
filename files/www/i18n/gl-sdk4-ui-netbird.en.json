@@ -103,6 +103,24 @@
         "msg_saved": "Settings saved",
         "msg_saved_restart": "Settings saved — restarting NetBird",
         "action_done": "Done",
-        "action_failed": "Failed"
+        "action_failed": "Failed",
+        "hw_switch": "Hardware switch controls NetBird",
+        "hw_switch_hint": "When the toggle switch is set to \"VPN client\" in System → Toggle Button Settings, it also turns NetBird on and off.",
+        "networks_title": "Networks & exit nodes",
+        "networks_hint": "Routes and exit nodes your management server offers this router. Switch one on to route through it; LAN clients follow automatically.",
+        "networks_disabled_hint": "Client routes are disabled in Advanced settings — enable them to use networks and exit nodes.",
+        "network": "Network",
+        "network_range": "Range / domains",
+        "network_active": "Active",
+        "no_networks": "No networks offered",
+        "exit_node_tag": "exit node",
+        "exit_preferred": "preferred",
+        "exit_set_preferred": "Use for switch",
+        "net_selected": "Network activated",
+        "net_deselected": "Network deactivated",
+        "hw_switch_mode": "Switch function",
+        "hw_switch_mode_hint": "What the hardware switch controls when set to \"VPN client\".",
+        "hw_mode_service": "NetBird on / off",
+        "hw_mode_exitnode": "Preferred exit node on / off"
     }
 }

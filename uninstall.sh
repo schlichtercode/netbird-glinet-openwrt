@@ -14,6 +14,12 @@ echo ">> stopping service"
 [ -x /etc/init.d/netbird ] && { /etc/init.d/netbird stop; /etc/init.d/netbird disable; } 2>/dev/null
 killall -q netbird 2>/dev/null; sleep 1; killall -q -9 netbird 2>/dev/null
 [ -f /usr/libexec/netbird/common.sh ] && { . /usr/libexec/netbird/common.sh; nb_load_config; nb_firewall_zone_remove; nb_dns_sync clear; nb_resolv_restore; }
+echo ">> removing switch hook"
+f=/etc/gl-switch.d/vpn.sh
+if [ -f "$f" ] && grep -q "netbird/switch.sh" "$f"; then
+    sed -i '/netbird-glinet-openwrt: let the switch/d; /netbird\/switch.sh/d' "$f"
+    rm -f "$f.pre-netbird"
+fi
 echo ">> removing files"
 rm -f /etc/init.d/netbird /usr/lib/oui-httpd/rpc/netbird /usr/share/gl-validator.d/netbird.lua \
       /usr/share/oui/menu.d/netbird.json /www/views/gl-sdk4-ui-netbird.common.js.gz /www/views/gl-sdk4-ui-netbird.common.js \
@@ -29,6 +35,6 @@ else
     echo ">> kept /etc/netbird (enrollment) and /etc/config/netbird — use --purge to delete"
 fi
 /etc/init.d/dnsmasq reload >/dev/null 2>&1 || true
-command -v nginx >/dev/null 2>&1 && nginx -s reload 2>/dev/null || true
+[ -x /etc/init.d/nginx ] && /etc/init.d/nginx restart >/dev/null 2>&1 || true
 echo ">> done"
 REMOTE

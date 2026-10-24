@@ -15,6 +15,8 @@ module.exports = {
       advOpen: false,
       advToken: "",
       logText: "",
+      networks: [],
+      netBusy: false,
       logOpen: false,
       busy: false,
       lastActionTs: 0,
@@ -73,6 +75,7 @@ module.exports = {
           if (a && a.ts) self.lastActionTs = a.ts;
         }
         if (self.logOpen) self.loadLog();
+        if (r.running && r.status && r.status.mgmt_connected) self.loadNetworks(); else self.networks = [];
       }).catch(function () {
         self.inflight = false;
         self.loading = false;
@@ -84,6 +87,32 @@ module.exports = {
       for (k in (c.settings || {})) out.settings[k] = c.settings[k];
       for (k in (c.connection || {})) out.connection[k] = c.connection[k];
       return out;
+    },
+    loadNetworks: function () {
+      var self = this;
+      this.rpc("get_networks").then(function (r) {
+        if (r && r.networks) self.networks = r.networks;
+      });
+    },
+    setNetwork: function (id, on) {
+      var self = this;
+      if (this.netBusy) return;
+      this.netBusy = true;
+      this.rpc("select_network", { id: id, selected: !!on }).then(function (r) {
+        self.netBusy = false;
+        if (!r || r.err_code) { self.toast("error", (r && r.err_msg) || self.t("msg_failed")); return; }
+        self.toast("success", on ? self.t("net_selected") : self.t("net_deselected"));
+        setTimeout(self.loadNetworks, 1500);
+      }).catch(function () { self.netBusy = false; self.toast("error", self.t("msg_failed")); });
+    },
+    setPreferredExit: function (id) {
+      var self = this;
+      this.rpc("set_config", { connection: { exit_node: id } }).then(function (r) {
+        if (!r || r.err_code) { self.toast("error", (r && r.err_msg) || self.t("msg_failed")); return; }
+        if (self.adv) self.adv.connection.exit_node = id;
+        if (self.s && self.s.config) self.s.config.connection.exit_node = id;
+        self.toast("success", self.t("msg_saved"));
+      });
     },
     loadLog: function () {
       var self = this;
@@ -373,6 +402,29 @@ module.exports = {
       ]));
     }
 
+    /* ── networks / exit nodes ────────────────────────────── */
+    if (s && s.installed && running && connected) {
+      var pref = (cfg && cfg.connection && cfg.connection.exit_node) || "";
+      var clientRoutesOff = !!(cfg && cfg.connection && cfg.connection.disable_client_routes);
+      var nrows = this.networks.length ? this.networks.map(function (n) {
+        var isPref = n.exit_node && n.id === pref;
+        return h("tr", [
+          h("td", [n.id, n.exit_node ? h("span", { class: "nb-tag" }, [t("exit_node_tag")]) : null, isPref ? h("span", { class: "nb-tag" }, [t("exit_preferred")]) : null]),
+          h("td", [n.range || (n.domains && n.domains.length ? n.domains.join(", ") : "—")]),
+          h("td", [sw(n.selected, function (v) { self.setNetwork(n.id, v); }, clientRoutesOff || self.netBusy)]),
+          h("td", [n.exit_node && !isPref ? h("span", { class: "nb-link", on: { click: function () { self.setPreferredExit(n.id); } } }, [t("exit_set_preferred")]) : null])
+        ]);
+      }) : [h("tr", [h("td", { class: "nb-empty", attrs: { colspan: 4 } }, [t("no_networks")])])];
+      children.push(card([
+        h("div", { class: "nb-sub" }, [t("networks_title")]),
+        h("p", { class: "nb-desc" }, [clientRoutesOff ? t("networks_disabled_hint") : t("networks_hint")]),
+        h("table", { class: "nb-table" }, [
+          h("thead", [h("tr", [h("th", [t("network")]), h("th", [t("network_range")]), h("th", [t("network_active")]), h("th", [""])])]),
+          h("tbody", nrows)
+        ])
+      ]));
+    }
+
     /* ── advanced settings ────────────────────────────────── */
     if (s && s.installed && this.adv) {
       var a = this.adv;
@@ -397,7 +449,16 @@ module.exports = {
               check(t("firewall_zone"), a.connection, "firewall_zone", t("firewall_zone_hint")),
               check(t("block_lan_access"), a.connection, "block_lan_access", t("block_lan_access_hint")),
               check(t("wg_userspace_opt"), a.settings, "wg_userspace", t("wg_userspace_hint")),
-              check(t("disable_ebpf_proxy"), a.settings, "disable_ebpf_proxy", t("disable_ebpf_proxy_hint"))
+              check(t("disable_ebpf_proxy"), a.settings, "disable_ebpf_proxy", t("disable_ebpf_proxy_hint")),
+              check(t("hw_switch"), a.settings, "hw_switch", t("hw_switch_hint")),
+              h("div", { class: "nb-check" }, [
+                h("div", [h("div", [t("hw_switch_mode")]), h("div", { class: "nb-hint" }, [t("hw_switch_mode_hint")])]),
+                h("select", { class: "nb-input", style: "width:auto", attrs: { value: a.settings.hw_switch_mode },
+                  on: { change: function (e) { self.$set(a.settings, "hw_switch_mode", e.target.value); } } }, [
+                  h("option", { attrs: { value: "service", selected: a.settings.hw_switch_mode !== "exitnode" } }, [t("hw_mode_service")]),
+                  h("option", { attrs: { value: "exitnode", selected: a.settings.hw_switch_mode === "exitnode" } }, [t("hw_mode_exitnode")])
+                ])
+              ])
             ])
           ]),
           h("div", { class: "nb-hint" }, [t("restart_hint")]),

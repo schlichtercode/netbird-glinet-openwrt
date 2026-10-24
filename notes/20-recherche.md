@@ -130,3 +130,12 @@ Release mit Go 1.25, Juli 2026); andere Architekturen bekommen 0.81.4. Sobald Go
 - Dashboard des Nutzers: Policy „Allowed Travel To MGMT Home“ = Opal → Netzwerk-Ressource 172.16.10.0/24 (Router-Peer
   `netbird-mgmt`). Keine Peer↔Peer-Policy ⇒ ACL-INPUT leer, Ping auf 100.78.190.62 unbeantwortet, kein DNS-Record
   für den Peer — alles erwartbar. Mit `disable_client_routes=0` liegt `172.16.10.0/24 dev wt0` im Routing.
+
+## Vorfall 3 (2026-10-24 ~23:00): verwaiste nginx-Worker fressen 30 MB
+- `nginx -s reload` (vom Installer bei jedem Lauf) startet neue Worker; die alten bleiben, solange die
+  Panel-WebSocket (`/ws`) des Browsers offen ist ⇒ 5 nginx-Prozesse (75 MB) statt 3 (45 MB), MemAvailable ~8 MB
+  **ohne** NetBird-Daemon. Der Speicherwächter stoppte daraufhin (korrekt nach Regel, aber am falschen Täter) NetBird.
+- Fix: Installer restartet nginx nur, wenn sich das RPC-Objekt geändert hat (md5-Vergleich), und dann mit
+  `/etc/init.d/nginx restart` statt reload. Panel-Seite danach neu laden.
+- Hardware-Schalter: Hook in `/etc/gl-switch.d/vpn.sh` → `/usr/libexec/netbird/switch.sh on|off`; getestet (OFF räumt
+  wt0/Resolver/dnsmasq auf, ON startet via procd). Menüpunkt jetzt unter VPN.

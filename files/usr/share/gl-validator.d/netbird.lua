@@ -9,4 +9,6 @@ return {
     get_config = true,
     run_watchdog = true,
     get_exit_state = true,
+    get_networks = true,
+    select_network = true,
 }

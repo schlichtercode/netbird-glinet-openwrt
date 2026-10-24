@@ -103,6 +103,24 @@
         "msg_saved": "設定已儲存",
         "msg_saved_restart": "設定已儲存 — 正在重新啟動 NetBird",
         "action_done": "完成",
-        "action_failed": "失敗"
+        "action_failed": "失敗",
+        "hw_switch": "硬體開關控制 NetBird",
+        "hw_switch_hint": "當在系統 → 開關設定中將撥動開關設為「VPN 用戶端」時，它也會同時開啟/關閉 NetBird。",
+        "networks_title": "網路與出口節點",
+        "networks_hint": "管理伺服器提供給此路由器的路由與出口節點。開啟後流量經其轉送，區域網路用戶端自動跟隨。",
+        "networks_disabled_hint": "進階設定中已停用用戶端路由，請啟用後再使用網路與出口節點。",
+        "network": "網路",
+        "network_range": "範圍 / 網域",
+        "network_active": "啟用",
+        "no_networks": "未提供網路",
+        "exit_node_tag": "出口節點",
+        "exit_preferred": "偏好",
+        "exit_set_preferred": "用於開關",
+        "net_selected": "網路已啟用",
+        "net_deselected": "網路已停用",
+        "hw_switch_mode": "開關功能",
+        "hw_switch_mode_hint": "硬體開關設為「VPN 用戶端」時所控制的內容。",
+        "hw_mode_service": "NetBird 開 / 關",
+        "hw_mode_exitnode": "偏好出口節點 開 / 關"
     }
 }

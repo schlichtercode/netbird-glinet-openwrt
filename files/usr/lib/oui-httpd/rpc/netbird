@@ -170,13 +170,14 @@ local SCHEMA = {
     settings = {
         enabled = "bool", log_level = "loglevel", gogc = "int", gomemlimit = "memsize",
         wg_userspace = "bool", disable_ebpf_proxy = "bool", skip_nftables_check = "bool",
-        watchdog_interval = "int", mem_min_kb = "int", mem_cooldown = "int",
+        watchdog_interval = "int", mem_min_kb = "int", mem_cooldown = "int", hw_switch = "bool",
+        hw_switch_mode = "switchmode",
     },
     connection = {
         management_url = "url", hostname = "host", disable_client_routes = "bool",
         disable_server_routes = "bool", disable_dns = "bool", lan_dns_forward = "bool",
         block_lan_access = "bool", firewall_zone = "bool", wireguard_port = "port", api_token = "token",
-        extra_up_args = "args",
+        extra_up_args = "args", exit_node = "netid",
     },
 }
 
@@ -205,6 +206,11 @@ local function validate(kind, v)
     elseif kind == "token" then
         if v == "" then return "" end
         return v:match("^[%w%-%._]+$") and #v <= 200 and v or nil
+    elseif kind == "switchmode" then
+        return (v == "service" or v == "exitnode") and v or nil
+    elseif kind == "netid" then
+        if v == "" then return "" end
+        return (not v:find("[%c\"\\]")) and #v <= 100 and v or nil
     elseif kind == "args" then
         if v == "" then return "" end
         return v:match("^[%w%-%._:=/ ]+$") and #v <= 300 and v or nil
@@ -381,6 +387,39 @@ M.action = function(params)
     end
     background("sh " .. ACTION .. " " .. q(name) .. " " .. q(arg))
     return { ok = true, action = name }
+end
+
+-- Networks (routes / exit nodes) the management server offers this peer,
+-- with their selection state. Read through the daemon gateway (no CLI).
+M.get_networks = function(params)
+    if not sock_exists() then return { networks = {} } end
+    local out = sh(". " .. COMMON .. "; nb_load_config; nb_networks_json")
+    local ok, t = pcall(cjson.decode, out)
+    local list = {}
+    if ok and type(t) == "table" and type(t.routes) == "table" then
+        for _, n in ipairs(t.routes) do
+            if type(n) == "table" and type(n.ID) == "string" then
+                local range = type(n.range) == "string" and n.range or ""
+                list[#list + 1] = {
+                    id = n.ID, range = range, selected = n.selected == true,
+                    domains = tbl(n.domains),
+                    exit_node = (range == "0.0.0.0/0" or range == "::/0"),
+                }
+            end
+        end
+        table.sort(list, function(a, b) return a.id < b.id end)
+    end
+    return { networks = list }
+end
+
+-- params: { id = "<network id>", selected = true|false }
+M.select_network = function(params)
+    if type(params) ~= "table" or type(params.id) ~= "string" or params.id == "" then return err("invalid params") end
+    if params.id:find("[%c\"\\]") or #params.id > 100 then return err("invalid network id") end
+    if not sock_exists() then return err("daemon not running") end
+    local state = (params.selected == true or params.selected == "true" or params.selected == 1) and "on" or "off"
+    os.execute(". " .. COMMON .. "; nb_load_config; nb_network_set " .. q(params.id) .. " " .. state .. " >/dev/null 2>&1")
+    return { ok = true, id = params.id, selected = (state == "on") }
 end
 
 M.get_log = function(params)

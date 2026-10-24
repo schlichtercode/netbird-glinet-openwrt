@@ -103,6 +103,24 @@
         "msg_saved": "Einstellungen gespeichert",
         "msg_saved_restart": "Einstellungen gespeichert — NetBird wird neu gestartet",
         "action_done": "Erledigt",
-        "action_failed": "Fehlgeschlagen"
+        "action_failed": "Fehlgeschlagen",
+        "hw_switch": "Hardware-Schalter steuert NetBird",
+        "hw_switch_hint": "Steht der Schalter unter System → Konfiguration des Schalters auf „VPN-Client“, schaltet er auch NetBird ein und aus.",
+        "networks_title": "Netzwerke & Exit-Nodes",
+        "networks_hint": "Routen und Exit-Nodes, die dein Management-Server diesem Router anbietet. Einschalten leitet den Verkehr darüber; LAN-Clients folgen automatisch.",
+        "networks_disabled_hint": "Client-Routen sind in den erweiterten Einstellungen deaktiviert — einschalten, um Netzwerke und Exit-Nodes zu nutzen.",
+        "network": "Netzwerk",
+        "network_range": "Bereich / Domains",
+        "network_active": "Aktiv",
+        "no_networks": "Keine Netzwerke angeboten",
+        "exit_node_tag": "Exit-Node",
+        "exit_preferred": "bevorzugt",
+        "exit_set_preferred": "Für Schalter nutzen",
+        "net_selected": "Netzwerk aktiviert",
+        "net_deselected": "Netzwerk deaktiviert",
+        "hw_switch_mode": "Schalter-Funktion",
+        "hw_switch_mode_hint": "Was der Hardware-Schalter steuert, wenn er auf „VPN-Client“ steht.",
+        "hw_mode_service": "NetBird an / aus",
+        "hw_mode_exitnode": "Bevorzugten Exit-Node an / aus"
     }
 }

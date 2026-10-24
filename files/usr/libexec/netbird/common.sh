@@ -37,6 +37,9 @@ nb_load_config() {
     NB_JSON_SOCKET=$(nb_uci settings json_socket 1)
     NB_MEM_MIN_KB=$(nb_uci settings mem_min_kb 9216)
     NB_MEM_COOLDOWN=$(nb_uci settings mem_cooldown 120)
+    NB_HW_SWITCH=$(nb_uci settings hw_switch 1)
+    NB_HW_SWITCH_MODE=$(nb_uci settings hw_switch_mode service)   # service | exitnode
+    NB_EXIT_NODE=$(nb_uci connection exit_node "")                 # network ID of the preferred exit node
 
     NB_MGMT_URL=$(nb_uci connection management_url "https://api.netbird.io:443")
     NB_HOSTNAME=$(nb_uci connection hostname "")
@@ -358,3 +361,22 @@ nb_firewall_zone_remove() {
 # NetBird's own NETBIRD-* iptables chains vanish when fw3 flushes the tables
 # (firewall restart on WAN changes). While connected they must exist.
 nb_chains_present() { iptables-save 2>/dev/null | grep -q '^:NETBIRD'; }
+
+# ── Networks / exit nodes (client side) via the daemon gateway ───────────────
+nb_gw_post() { # <method> <json-body>
+    curl -s --max-time 10 -X POST -H 'Content-Type: application/json' -d "$2" \
+        "http://$NB_HTTP_ADDR/daemon.DaemonService/$1" 2>/dev/null
+}
+nb_networks_json() { [ -S "$NB_SOCK" ] && nb_gw_post ListNetworks '{}'; }
+# nb_network_set <network-id> on|off
+nb_network_set() {
+    local id esc
+    esc=$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g')
+    case "$2" in
+        on)  nb_gw_post SelectNetworks "{\"networkIDs\":[\"$esc\"],\"append\":true}" >/dev/null ;;
+        off) nb_gw_post DeselectNetworks "{\"networkIDs\":[\"$esc\"]}" >/dev/null ;;
+        *) return 2 ;;
+    esac
+    nb_invalidate_status
+    nb_log "network '$1' -> $2"
+}

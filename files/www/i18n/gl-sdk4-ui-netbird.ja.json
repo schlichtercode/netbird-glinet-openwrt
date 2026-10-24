@@ -103,6 +103,24 @@
         "msg_saved": "設定を保存しました",
         "msg_saved_restart": "設定を保存しました — NetBird を再起動します",
         "action_done": "完了",
-        "action_failed": "失敗"
+        "action_failed": "失敗",
+        "hw_switch": "ハードウェアスイッチで NetBird を制御",
+        "hw_switch_hint": "システム → トグルボタン設定でスイッチを「VPN クライアント」にすると、NetBird のオン/オフも切り替わります。",
+        "networks_title": "ネットワークとエグジットノード",
+        "networks_hint": "管理サーバーがこのルーターに提供するルートとエグジットノード。有効にするとそこ経由で通信し、LAN クライアントも自動的に従います。",
+        "networks_disabled_hint": "詳細設定でクライアントルートが無効です。ネットワークやエグジットノードを使うには有効にしてください。",
+        "network": "ネットワーク",
+        "network_range": "範囲 / ドメイン",
+        "network_active": "有効",
+        "no_networks": "提供されているネットワークはありません",
+        "exit_node_tag": "エグジットノード",
+        "exit_preferred": "優先",
+        "exit_set_preferred": "スイッチで使用",
+        "net_selected": "ネットワークを有効化しました",
+        "net_deselected": "ネットワークを無効化しました",
+        "hw_switch_mode": "スイッチの機能",
+        "hw_switch_mode_hint": "「VPN クライアント」に設定したハードウェアスイッチが何を制御するか。",
+        "hw_mode_service": "NetBird のオン / オフ",
+        "hw_mode_exitnode": "優先エグジットノードのオン / オフ"
     }
 }

@@ -25,6 +25,12 @@ config settings 'settings'
 	# to keep the router responsive, and lets it restart after mem_cooldown s.
 	option mem_min_kb '9216'
 	option mem_cooldown '120'
+	# 1 = the router's hardware toggle switch controls NetBird when it is set
+	# to "VPN client" in the GL.iNet panel (hook in /etc/gl-switch.d/vpn.sh).
+	option hw_switch '1'
+	# What the switch does: 'service' = NetBird on/off,
+	# 'exitnode' = select/deselect the exit node named in connection.exit_node.
+	option hw_switch_mode 'service'
 	# Watchdog loop interval in seconds.
 	option watchdog_interval '300'
 	# Extra KEY=VALUE pairs for the daemon environment, space separated.
@@ -54,6 +60,8 @@ config connection 'connection'
 	option wireguard_port '51820'
 	# Extra flags appended to `netbird up` (no whitespace inside a value).
 	option extra_up_args ''
+	# Network ID of the exit node this router should use (panel: Networks card).
+	option exit_node ''
 	# Optional NetBird API token: enables the Exit Node toggle in the panel.
 	option api_token ''
 	option peer_id ''

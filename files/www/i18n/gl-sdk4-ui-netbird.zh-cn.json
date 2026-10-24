@@ -103,6 +103,24 @@
         "msg_saved": "设置已保存",
         "msg_saved_restart": "设置已保存 — 正在重启 NetBird",
         "action_done": "完成",
-        "action_failed": "失败"
+        "action_failed": "失败",
+        "hw_switch": "硬件开关控制 NetBird",
+        "hw_switch_hint": "当在系统 → 开关设置中将拨动开关设为“VPN 客户端”时，它也会同时打开/关闭 NetBird。",
+        "networks_title": "网络与出口节点",
+        "networks_hint": "管理服务器向此路由器提供的路由和出口节点。打开后流量经其转发，局域网客户端自动跟随。",
+        "networks_disabled_hint": "高级设置中已禁用客户端路由，请启用后再使用网络和出口节点。",
+        "network": "网络",
+        "network_range": "范围 / 域名",
+        "network_active": "启用",
+        "no_networks": "未提供网络",
+        "exit_node_tag": "出口节点",
+        "exit_preferred": "首选",
+        "exit_set_preferred": "用于开关",
+        "net_selected": "网络已启用",
+        "net_deselected": "网络已停用",
+        "hw_switch_mode": "开关功能",
+        "hw_switch_mode_hint": "硬件开关设为“VPN 客户端”时控制的内容。",
+        "hw_mode_service": "NetBird 开 / 关",
+        "hw_mode_exitnode": "首选出口节点 开 / 关"
     }
 }

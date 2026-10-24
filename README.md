@@ -6,8 +6,9 @@ Fork of [devNalyx/netbird-openwrt](https://github.com/devNalyx/netbird-openwrt),
 
 ## What you get
 
-- **NetBird page inside the GL.iNet admin panel** (Applications → NetBird), in all seven panel languages (en, de, es, it, ja, zh-cn, zh-tw). Enrol with a setup key, see peers, memory and DNS state, restart, toggle the exit node, edit every setting. Protected by the panel login like every other GL page.
-- **procd service** with auto-restart (unlimited retries — an OOM kill must never leave the router without NetBird) and a **watchdog instance**: reconnects, repairs the router's resolver, keeps the firewall zone, logs memory use. No cron (GL.iNet's crond ignores `/etc/crontabs`).
+- **NetBird page inside the GL.iNet admin panel** (VPN → NetBird), in all seven panel languages (en, de, es, it, ja, zh-cn, zh-tw). Enrol with a setup key, see peers, memory and DNS state, restart, toggle the exit node, edit every setting. Protected by the panel login like every other GL page.
+- **procd service** with auto-restart and a **watchdog instance**: reconnects, repairs the router's resolver, keeps the firewall zone, logs memory use, and a **memory guard** that stops the daemon before the router starts thrashing and brings it back after a cooldown. No cron (GL.iNet's crond ignores `/etc/crontabs`).
+- **Hardware switch**: set it to "VPN client" in the GL panel and it turns NetBird (or the preferred exit node) on and off.
 - **NetBird DNS fully usable**: peer names and DNS routes work on the router *and* for every LAN client — the watchdog publishes NetBird's domains to GL's dnsmasq as forwarders.
 - **GL-native firewall zone** `netbird` for `wt0` (masquerade, lan→netbird, netbird→wan) so LAN clients can use NetBird routes / exit nodes and the router can be an exit node itself.
 - **One-command installer** from your computer: detects CPU/endianness, downloads and verifies the right NetBird release, streams the binary onto the router (never through RAM-backed `/tmp`), installs everything, and prints a compatibility report. `uninstall.sh` removes it again.
@@ -35,7 +36,7 @@ cd netbird-glinet-openwrt
 
 Optional second argument: your management URL **with port**, e.g. `./install.sh root@192.168.8.1 https://netbird.example.com:443`. Use `./install.sh root@192.168.8.1 --probe` to only print the compatibility report.
 
-Then open the GL.iNet panel → **Applications → NetBird**, enter the management URL (default `https://api.netbird.io:443`) and a **reusable setup key** (NetBird dashboard → Setup Keys), click *Connect*. Enrollment survives reboots.
+Then open the GL.iNet panel → **VPN → NetBird**, enter the management URL (default `https://api.netbird.io:443`) and a **reusable setup key** (NetBird dashboard → Setup Keys), click *Connect*. Enrollment survives reboots.
 
 Tip for GL.iNet 18.06-based firmware (Opal): its dropbear only speaks `ssh-rsa`; the installer passes the right options, and a key-based login avoids repeated password prompts:
 ```bash
@@ -80,6 +81,9 @@ Everything is editable in the panel's *Advanced settings*; the UCI file is the s
 | `connection.lan_dns_forward` | 1 | dnsmasq forwards NetBird domains → LAN clients resolve peers + DNS routes |
 | `connection.firewall_zone` | 1 | maintain zone `netbird` (wt0) + forwardings |
 | `connection.block_lan_access` | 0 | peers may not reach this router's LAN |
+| `connection.exit_node` | — | preferred exit node (network ID) for the hardware switch |
+| `settings.hw_switch` / `hw_switch_mode` | 1 / `service` | hardware switch coupling, see below |
+| `settings.mem_min_kb` / `mem_cooldown` | 9216 / 120 | memory guard: stop the daemon below this MemAvailable, restart after the cooldown |
 | `connection.api_token` | — | NetBird API token: enables the exit-node switch in the panel |
 
 Apply changes with `/etc/init.d/netbird restart` (the panel does this for you).
@@ -88,7 +92,22 @@ Apply changes with `/etc/init.d/netbird restart` (the panel does this for you).
 
 NetBird's resolver listens on `127.0.0.153:53` (dnsmasq owns `127.0.0.1`). NetBird points the **router's own** `/etc/resolv.conf` at it and forwards everything else to its previous upstream (dnsmasq). On OpenWrt that file lives in RAM and gets rewritten by dnsmasq restarts, so the watchdog re-points it whenever NetBird is connected. For **LAN clients** the watchdog reads the domains NetBird serves (peer domain + every DNS route from your management server) and writes `server=/<domain>/127.0.0.153` lines to `/tmp/dnsmasq.d/netbird.conf`, reloading dnsmasq only when the list changes.
 
-### Exit node
+### Networks and exit nodes (this router as a client)
+
+The *Networks & exit nodes* card lists every route and exit node your management server offers this router, with a switch per entry. Switching one on selects it in the daemon (the same as `netbird networks select`); LAN clients use it automatically thanks to the firewall zone. Mark one exit node as *preferred* to tie it to the hardware switch (below). Requires *Ignore routes from other peers* to be off.
+
+### Hardware toggle switch
+
+Set the router's slide switch to **VPN client** under *System → Toggle Button Settings*. The installer appends a two-line hook to GL.iNet's switch handler (`/etc/gl-switch.d/vpn.sh`), so the switch also drives NetBird:
+
+| `settings.hw_switch_mode` | Switch on | Switch off |
+|---|---|---|
+| `service` (default) | start NetBird | stop NetBird (wt0, rules and DNS are cleaned up) |
+| `exitnode` | select the preferred exit node (`connection.exit_node`) | deselect it, NetBird stays connected |
+
+Turn the coupling off with `settings.hw_switch = 0`. `uninstall.sh` removes the hook; after a GL.iNet firmware update re-run `install.sh` to restore it.
+
+### Exit node (this router as exit node for peers)
 
 *This router as exit node for peers:* enable server routes (default), create the exit-node route in the NetBird dashboard. The firewall zone provides masquerading. With an API token stored in the panel, the page shows a toggle for that route.
 
