@@ -196,7 +196,14 @@ bestätigt: `"respawn": ["3600","10","0"]`). procd auf dem Opal: `2018-11-23-d66
   sofort folgende `start` die Instanz wiederverwendet, läuft der Daemon **ohne respawn**. Jeder externe Kill (Memory Guard,
   OOM-Killer, Crash) ist dann endgültig. Aktueller Zustand nach der opkg-Installation: Daemon-Instanz wieder ohne `respawn`.
 
-Konsequenzen für den Code (noch nicht umgesetzt):
+**Umgesetzt und auf dem Opal getestet (2026-10-25 00:40):** `stop_service` → `nb_procd_stop_instances` (ubus `service delete`
+je Instanz + Warten bis procd sie freigegeben hat, dann Streuner killen); Watchdog-Loop → `nb_ensure_daemon` alle 10 s
+(Socket fehlt, kein Cooldown, ≥30 s: procd ohne lebenden Prozess ⇒ `start`; mit Prozess aber ≥120 s ohne Socket ⇒
+`restart`; beides double-fork-abgekoppelt, weil `stop_service` die Watchdog-Instanz mit beendet). Test: nach
+`install.sh --skip-binary` zeigen beide Instanzen `respawn {3600,10,0}`; `killall -TERM netbird` ⇒ Daemon weg nach 15 s,
+procd-Respawn nach 25 s, Socket zurück nach 37 s, `respawn` bleibt. Vorher: `respawn` fehlte, Kill war endgültig.
+
+Konsequenzen für den Code (jetzt umgesetzt, s. o.):
 1. Watchdog darf sich nicht auf procd verlassen: Socket fehlt, `enabled=1`, kein aktiver `hold-until` ⇒ nach einem
    Intervall `/etc/init.d/netbird start` (statt „procd will respawn“).
 2. `stop_service`: Daemon-Instanz über procd beenden (`ubus call service delete '{"name":"netbird","instance":"daemon"}'`)

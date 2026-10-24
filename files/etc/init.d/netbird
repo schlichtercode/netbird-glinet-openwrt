@@ -54,7 +54,11 @@ stop_service() {
     # No `netbird down` here: that forks the 46 MB CLI next to the daemon.
     # SIGTERM makes the daemon shut down cleanly on its own (interface,
     # firewall rules and resolv.conf are restored by the daemon).
-    nb_kill_daemon 15
+    # Stop through procd and wait until it has freed the instances: a process
+    # we kill ourselves leaves procd an instance that it re-uses on the next
+    # start — and procd 2018 re-uses it without its respawn flag once that
+    # was lost (notes/20-recherche.md, Vorfall 4).
+    nb_procd_stop_instances 30
     rm -f "$NB_SOCK"
     nb_invalidate_status
     nb_dns_sync clear

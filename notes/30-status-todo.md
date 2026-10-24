@@ -50,9 +50,9 @@
 - [ ] Noch nicht getestet: `opkg remove netbird-glinet` (prerm → `setup-router.sh uninstall --keep-files`), Upgrade auf eine
       neuere Paketversion (prerm `upgrade`), Installation über die GL-Paketseite mit echtem Feed.
 - [x] **Nebenbefund analysiert (2026-10-25):** Daemon 25 min down, weil procd 2018-11-23 das `respawn`-Flag beim
-      Wiederverwenden einer Instanz verliert (Upstream-Fix a30a8fd, 2019-04-17, nicht in GL 4.8.3). Details + drei
-      Code-Konsequenzen in `20-recherche.md`, „Vorfall 4“. **Offen: umsetzen** (Watchdog-Selbststart, `stop_service` via
-      `ubus service delete instance` + Warten, Guard-Nachprüfung). Bis dahin: nach jedem externen Kill bleibt der Daemon tot.
+      Wiederverwenden einer Instanz verliert (Upstream-Fix a30a8fd, 2019-04-17, nicht in GL 4.8.3). Details in
+      `20-recherche.md`, „Vorfall 4“. **Fix umgesetzt + getestet (00:40):** `stop_service` via ubus-Instanz-Delete + Warten,
+      Watchdog `nb_ensure_daemon` alle 10 s. Externer Kill ⇒ procd-Respawn nach 25 s, `respawn`-Flag bleibt erhalten.
 - [x] Schalter-Dropdown zeigte `vpn.sh.pre-netbird` (GL listet alles in `/etc/gl-switch.d/`): Backup entfällt,
       `setup-router.sh` räumt alte Backups weg; auf dem Router gelöscht (2026-10-25).
 - [ ] Offen: Verhalten der GL-Paketseite bei mehrminütigem `postinst` (Timeout?) — ggf. Download in den Hintergrund

@@ -19,12 +19,12 @@ pass() {
     # ── Duplicate daemon → full cleanup + procd restart ───────────────────
     if [ "$(nb_daemon_count)" -gt 1 ]; then
         nb_log "duplicate daemon detected — restarting service"
-        /etc/init.d/netbird restart >/dev/null 2>&1
+        nb_service_detached restart
         return 0
     fi
 
-    # ── Daemon missing → procd respawns it; nothing else to do this pass ──
-    [ -S "$NB_SOCK" ] || { nb_log "daemon socket missing (procd will respawn)"; return 0; }
+    # ── Daemon missing → the 10 s loop (nb_ensure_daemon) brings it back ──
+    [ -S "$NB_SOCK" ] || { nb_log "daemon socket missing — ensure_daemon handles it"; return 0; }
 
     # ── Reconnect ─────────────────────────────────────────────────────────
     local state
@@ -80,14 +80,49 @@ pass() {
     nb_log "mgmt=$state wg=$(nb_wg_mode) rss=$(nb_daemon_rss_kb)kB mem_avail=$(nb_mem_available_kb)kB"
 }
 
+# Daemon liveness, checked every 10 s. procd on GL 4.8.3 can silently lose an
+# instance's respawn flag (notes/20-recherche.md, Vorfall 4); then nobody
+# restarts a daemon the memory guard or the OOM killer took down. Rules:
+#   socket present                    → fine
+#   memory-guard cooldown still ahead → run-daemon.sh is waiting on purpose
+#   socket missing < 30 s             → daemon starting (profile sync etc.)
+#   procd has no live daemon process  → `start` (fresh instance, no CLI fork)
+#   procd has one but no socket 120 s → hung wrapper/daemon → `restart`
+MISSING=0
+nb_ensure_daemon() {
+    [ "$NB_ENABLED" = 1 ] || { MISSING=0; return 0; }
+    [ -S "$NB_SOCK" ] && { MISSING=0; return 0; }
+    local until now running
+    until=$(cat "$NB_RUN/hold-until" 2>/dev/null || echo 0); now=$(date +%s)
+    [ "$until" -gt "$now" ] 2>/dev/null && { MISSING=0; return 0; }
+    MISSING=$((MISSING + 1))
+    [ "$MISSING" -ge 3 ] || return 0
+    running=$(nb_procd_instance_running daemon)
+    if [ "$running" = true ]; then
+        [ "$MISSING" -ge 12 ] || return 0
+        nb_log "daemon process alive but no socket for $((MISSING * 10))s — restarting service"
+        MISSING=0
+        nb_service_detached restart
+    else
+        nb_log "daemon down for $((MISSING * 10))s and procd did not respawn it (respawn flag lost?) — starting service"
+        MISSING=0
+        nb_service_detached start
+    fi
+}
+# stop_service halts this watchdog instance too and waits for it to exit, so
+# a restart issued from here must not be our child: double-fork it.
+nb_service_detached() { ( /etc/init.d/netbird "$1" >/dev/null 2>&1 </dev/null & ) ; }
+
 case "${1:-once}" in
     loop)
         mkdir -p "$NB_RUN"
         nb_load_config
-        # Full pass every $NB_WATCHDOG_INTERVAL s; memory guard every 10 s.
+        # Full pass every $NB_WATCHDOG_INTERVAL s; memory guard + daemon
+        # liveness every 10 s.
         next_pass=$(( $(date +%s) + 15 ))
         while :; do
             nb_mem_guard && { sleep 30; continue; }
+            nb_ensure_daemon
             nb_panel_push
             if [ "$(date +%s)" -ge "$next_pass" ]; then
                 if mkdir "$LOCK" 2>/dev/null; then

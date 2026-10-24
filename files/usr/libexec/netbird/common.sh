@@ -137,6 +137,42 @@ nb_kill_daemon() {
     return 0
 }
 
+# ── procd instance helpers ───────────────────────────────────────────────────
+# procd on GL 4.8.3 (2018-11-23) loses an instance's respawn flag when it
+# re-uses an instance that it stopped itself (upstream fix a30a8fd, 2019 —
+# notes/20-recherche.md, Vorfall 4). A daemon without respawn stays dead after
+# an external kill (memory guard, OOM). Two countermeasures live here:
+#   nb_procd_stop_instances — stop through procd and wait until the instances
+#     are freed, so the next start creates fresh ones with respawn intact
+#   nb_procd_instance_running — lets the watchdog see whether procd still has
+#     a live process for the daemon; if not, the watchdog starts the service
+
+# "true" / "false" / "" (instance or service absent)
+nb_procd_instance_running() {
+    ubus call service list '{"name":"netbird"}' 2>/dev/null | jsonfilter -e "@.netbird.instances.$1.running" 2>/dev/null
+}
+
+# Tell procd to halt the daemon and watchdog instances (not just the
+# processes): a halted instance is freed when its process exits, a merely
+# killed process leaves procd with an instance that it re-uses. Waits up to
+# $1 seconds (default 30; procd escalates to SIGKILL after term_timeout 20 s)
+# until neither instance is running, then kills strays.
+nb_procd_stop_instances() {
+    local max="${1:-30}" i=0 inst
+    for inst in daemon watchdog; do
+        [ "$(nb_procd_instance_running "$inst")" = true ] || continue
+        ubus call service delete "{\"name\":\"netbird\",\"instance\":\"$inst\"}" >/dev/null 2>&1
+    done
+    while [ "$i" -lt "$max" ]; do
+        [ "$(nb_procd_instance_running daemon)" = true ] || [ "$(nb_procd_instance_running watchdog)" = true ] || break
+        sleep 1; i=$((i + 1))
+    done
+    [ "$i" -ge "$max" ] && nb_log "procd did not free the daemon instance within ${max}s"
+    # strays (daemon started outside procd, or procd gave up on it)
+    pgrep -x netbird >/dev/null 2>&1 && nb_kill_daemon 5
+    return 0
+}
+
 nb_prepare_dirs() {
     mkdir -p "$NB_STATE" "$NB_LOG_DIR" "$NB_RUN" /var/lib
     # /var -> /tmp on OpenWrt: keep config + WireGuard keys on the overlay.

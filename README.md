@@ -160,6 +160,8 @@ Measured on the Opal: daemon ≈ 17 MB RSS idle, GL's own nginx ≈ 45 MB, ~30 M
 
 **NETBIRD-* iptables chains disappeared after a WAN change.** fw3 reloads flush them; the watchdog notices within 5 min and re-applies via `netbird down/up`. Run `/usr/libexec/netbird/watchdog.sh once` to do it now.
 
+**Daemon stays down after the memory guard or the OOM killer hit it.** procd in GL.iNet 4.8.3 (2018-11-23) loses an instance's respawn flag when it re-uses an instance (fixed upstream in 2019). The init script therefore stops through procd and waits until the instance is freed, and the watchdog loop starts the service itself if the socket is missing for 30 s without a memory-guard cooldown. Check: `ubus call service list '{"name":"netbird"}'` must show a `respawn` block under `daemon`.
+
 **Two daemons / "Chain already exists".** `pkill` is missing on GL BusyBox; all scripts use `killall`. The watchdog kills duplicates and restarts. Manual full teardown: `/usr/libexec/netbird/cleanup.sh`.
 
 **Useful commands on the router**
