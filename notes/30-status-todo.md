@@ -111,3 +111,18 @@
   Frankfurt/DE. RIPE-Registrierung des Blocks 82.165.153.0/24: netname `fr-nbz-ionos-cloud-nbz`, country **FR** —
   IONOS hat das Netz unter der französischen Allokation eingetragen, obwohl der Server in Deutschland steht; die
   GeoIP-Datenbanken folgen teils der Registrierung. Nicht beeinflussbar von unserer Seite.
+
+## Durchsatz über den Exit-Node (2026-10-25 01:45, Analyse läuft)
+- Speedtest des Nutzers über den Exit-Node: 36 Mbit/s down, 72 up, Ping 30 ms (Ookla, Server Paris). „Deutlich langsamer
+  als ohne VPN“ (Zahl ohne VPN noch offen).
+- Befund: **beide Peers nur „Relayed“**, 0 ICE/P2P-Verbindungen im client.log, 13× „ICE Agent is not initialized yet“,
+  44 STUN-Probes (alle 20 s). Verkehr läuft Opal → Relay `rels://vpn.schlichte.cloud:443` (TLS/QUIC, userspace) → Exit-Node.
+- Upstream des Opal: 2,4-GHz-Repeater-Link (sta0, HT20, Kanal 1, −33 dBm) hinter 172.16.80.1 (Telekom-Anschluss,
+  öffentlich 84.136.219.81) ⇒ doppeltes NAT. STUN vom Mac hinter dem Opal funktioniert (Google + eigener Server 3478),
+  ausgehendes UDP ist also offen; `stun.netbird.io` antwortet nicht (irrelevant bei self-hosted).
+- CPU: MIPS 24K-Klasse, 531 BogoMIPS; Relay-Pfad = userspace Go + TLS zusätzlich zu WireGuard ⇒ CPU-limitiert.
+- Verdacht für fehlendes P2P: IONOS-Cloud-Firewall-Policy am Exit-Node lässt eingehendes UDP 51820 nicht durch (Default:
+  nur explizit geöffnete Ports) und/oder Host-Firewall (Debian 13). Prüfen: IONOS-Panel → Firewall-Policy → UDP 51820;
+  auf dem Server `ss -lun | grep 51820`, `nft list ruleset` / `ufw status`. Danach sollte das Panel „P2P“ statt
+  „Relayed“ zeigen.
+- Erwartungswert nach P2P: Kernel-WireGuard auf dem Opal + 2,4-GHz-HT20-Uplink ⇒ realistisch 50–80 Mbit/s, nicht mehr.
