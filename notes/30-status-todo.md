@@ -35,6 +35,19 @@
 - [ ] `uninstall.sh`
 - [ ] README/CONTRIBUTING für SFT1200
 
+## opkg-Feed (2026-10-25)
+- [x] `packaging/build.sh` + `check.sh`, Paket `netbird-glinet` (all), `setup-router.sh` als einzige Router-Logik,
+      `netbird-fetch-binary`, Workflow `feed.yml`, README-Abschnitt „Install via opkg feed“. Lokal gebaut und validiert;
+      `install.sh --probe` läuft mit dem Umbau; Skripte mit der BusyBox-ash des Routers `sh -n`-geprüft.
+- [ ] GitHub: Repo-Settings → Pages → Source „GitHub Actions“ aktivieren, dann ersten Tag `v0.1.0` pushen und den
+      Workflow-Lauf prüfen (Pages-URL, Release-Asset).
+- [ ] Auf dem Opal (nur nach Rückfrage, vorher `MemAvailable` prüfen): Feed im Panel eintragen, `opkg update`,
+      `opkg install netbird-glinet` über eine bestehende install.sh-Installation — erwartet: Config bleibt (preinst/postinst),
+      Binary-Version passt ⇒ kein Download, Dienst läuft, nginx-Restart verzögert. Danach `opkg remove` + `install.sh` testen.
+- [ ] Offen: Verhalten der GL-Paketseite bei mehrminütigem `postinst` (Timeout?) — ggf. Download in den Hintergrund
+      (procd-Instanz) verlagern.
+- [ ] `install.sh --skip-binary` gegen den Router laufen lassen (nutzt jetzt `setup-router.sh`), danach Panel neu laden.
+
 ## Nach der Installation auf dem Gerät zu testen
 - [ ] `netbird version` läuft (beweist Endianness)
 - [ ] RSS nach 10 min / 1 h (`grep VmRSS /proc/$(pgrep -f "netbird service run")/status`), `MemAvailable`

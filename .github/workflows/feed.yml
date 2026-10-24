@@ -1,0 +1,59 @@
+# Build the opkg package on every v* tag and publish the feed
+# (Packages, Packages.gz, .ipk) to GitHub Pages. The .ipk is also attached
+# to the GitHub release of that tag.
+#
+# One-time repository setting: Settings → Pages → Source: "GitHub Actions".
+# Feed URL afterwards: https://<owner>.github.io/<repo>
+name: opkg feed
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write   # release assets
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # tags are needed for the package version
+
+      - name: Build .ipk and feed index
+        run: sh packaging/build.sh
+
+      - name: Verify the package
+        run: sh packaging/check.sh build/feed
+
+      - name: Upload feed as Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/feed
+
+      - name: Attach .ipk to the GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "$TAG" --generate-notes
+          gh release upload "$TAG" build/feed/*.ipk build/feed/Packages build/feed/Packages.gz --clobber
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

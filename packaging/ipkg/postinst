@@ -1,0 +1,12 @@
+#!/bin/sh
+# netbird-glinet postinst — opkg calls it with "configure"
+[ -n "${IPKG_INSTROOT:-}" ] && exit 0
+# settings saved by preinst (install over a hand-installed copy)
+if [ -f /etc/config/netbird.pre-opkg ]; then
+    mv -f /etc/config/netbird.pre-opkg /etc/config/netbird
+    echo "   + kept the existing /etc/config/netbird"
+fi
+# Same router-side setup install.sh runs over SSH; it also downloads the
+# NetBird binary (netbird-fetch-binary) — ~46 MB, a few minutes on MIPS.
+/usr/libexec/netbird/setup-router.sh install
+exit 0

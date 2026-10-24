@@ -13,6 +13,8 @@ USE_PROCD=1
 start_service() {
     nb_load_config
     [ "$NB_ENABLED" = 1 ] || { nb_log "disabled in /etc/config/netbird"; return 0; }
+    # opkg install without internet / interrupted download: no binary yet
+    [ -x "$NB_BIN" ] || { nb_log "$NB_BIN missing — run netbird-fetch-binary"; return 0; }
     nb_prepare_dirs
     nb_invalidate_status
 

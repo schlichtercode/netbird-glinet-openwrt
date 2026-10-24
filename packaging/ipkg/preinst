@@ -1,0 +1,12 @@
+#!/bin/sh
+# netbird-glinet preinst — $1 is "install" or "upgrade" (opkg)
+[ -n "${IPKG_INSTROOT:-}" ] && exit 0
+# First install on a router that was set up with install.sh: /etc/config/netbird
+# is not tracked by opkg, so opkg would overwrite it with the template.
+# Save it; postinst puts it back.
+if [ "${1:-install}" = install ] && [ -f /etc/config/netbird ] && [ ! -f /etc/config/netbird.pre-opkg ]; then
+    cp /etc/config/netbird /etc/config/netbird.pre-opkg
+fi
+# A running daemon must not be replaced underneath (hand-installed or upgrade).
+[ -x /etc/init.d/netbird ] && /etc/init.d/netbird stop >/dev/null 2>&1
+exit 0

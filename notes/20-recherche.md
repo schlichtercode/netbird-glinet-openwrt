@@ -154,3 +154,21 @@ Release mit Go 1.25, Juli 2026); andere Architekturen bekommen 0.81.4. Sobald Go
 - Firmware-Update von GL überschreibt Hülle und Bundle → `install.sh` erneut ausführen.
 - Dashboard-Detailzeilen: `status.domain` muss ein **Array** sein (`domain.join(", ")`), sonst Render-Fehler und der ganze
   Detailblock verschwindet. Aufgeklappt-Zustand merkt sich GL pro tunnel_id (`tunnelUnfoldList` im History-Store).
+
+## opkg auf dem Opal — Fakten für den Feed (read-only geprüft 2026-10-25)
+- `opkg version 3b417b9f… (2017-12-07)`; `opkg print-architecture`: `all 1`, `noarch 1`, `mips_siflower 10`
+  ⇒ `Architecture: all` wird akzeptiert. Keine `check_signature`-Option in `/etc/opkg.conf` ⇒ unsignierter Feed geht.
+- GL-Feeds (`/etc/opkg/distfeeds.conf`): `src/gz … https://fw.gl-inet.com/releases/v18.06.5/…/siflower/…`; Index-Format
+  wie OpenWrt (`Package, Version, Depends, Section, Architecture, Installed-Size, Filename, Size, SHA256sum, Description`).
+  Paketnamen der Abhängigkeiten: `curl 7.63.0-1`, `lua 5.1.5-1`, `ca-bundle 20210119-1` (alle installiert).
+- opkg lädt .ipk nach `/tmp` (`dest ram /tmp`, `lists_dir /var/opkg-lists`) ⇒ Paket klein halten (unseres: ~55 KB).
+- Maintainer-Skripte: opkg ruft `preinst install|upgrade`, `postinst configure`, `prerm remove|upgrade`. GLs eigene
+  Pakete nutzen `default_prerm` aus `/lib/functions.sh`; eigene Skripte müssen `enable` selbst machen.
+  Conffiles: bei Upgrade bleibt eine lokal geänderte Datei erhalten (neue Version als `-opkg`); bei Erstinstallation
+  über eine **nicht** von opkg verwaltete Datei (install.sh-Altbestand) würde opkg sie überschreiben ⇒ `preinst`
+  sichert `/etc/config/netbird` nach `.pre-opkg`, `postinst` stellt sie zurück.
+- Werkzeuge für den Binary-Download auf dem Router: `sha256sum`, `tee`, `mkfifo`, BusyBox-`tar` mit `-z` und `-O`,
+  `set -o pipefail` wird von der ash akzeptiert. `curl` erreicht `github.com/…/releases/download/…` mit gültigem TLS
+  (HTTP 200, 1,4 s für die Checksummen-Datei).
+- Overlay: 60 MB frei **mit** installiertem Binary ⇒ Side-by-side-Download (46 MB) passt knapp; `netbird-fetch-binary`
+  löscht sonst das alte Binary vorher (Dienst ist dann ohnehin gestoppt).

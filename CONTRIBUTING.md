@@ -35,6 +35,18 @@ Please include:
 - State lives in `/etc/netbird/`. `/var/lib/netbird` is a symlink to it.
 - Never put large files in `/tmp`. It is RAM.
 
+### Router-side setup logic
+
+- Everything that changes the router after the files are in place lives in
+  `files/usr/libexec/netbird/setup-router.sh` (`sysctl` / `install` / `uninstall`).
+  `install.sh` calls it over SSH, the opkg package calls it from `postinst` / `prerm`.
+  Do not add such steps to `install.sh` or the package scripts directly.
+- The NetBird binary is never part of the package; `netbird-fetch-binary`
+  downloads it on the router. The pinned version is in
+  `files/usr/share/netbird-glinet/netbird-release` (one place for both installers).
+- `postinst` may run from the GL panel inside an nginx worker: never restart
+  nginx synchronously there (`nginx_restart_later` in setup-router.sh).
+
 ### Configuration
 
 - UCI (`/etc/config/netbird`) is the source of truth.
@@ -63,6 +75,22 @@ Please include:
 
 - Read `notes/` before starting.
 - Update `notes/30-status-todo.md` when behaviour changes.
+
+## Building and releasing the opkg package
+
+```bash
+sh packaging/build.sh            # → build/feed/netbird-glinet_<ver>_all.ipk, Packages, Packages.gz
+sh packaging/check.sh build/feed # unpack + validate without a router
+```
+
+The version comes from the git tag (`v1.2.3` → `1.2.3-1`; untagged builds get `<tag>+N.g<sha>-1`).
+Releasing: `git tag v1.2.3 && git push origin v1.2.3`. The workflow `.github/workflows/feed.yml`
+builds the package, publishes `build/feed/` to GitHub Pages (repository setting
+*Pages → Source: GitHub Actions* must be on once) and attaches the `.ipk` to the GitHub release.
+Feed URL: `https://schlichtercode.github.io/netbird-glinet-openwrt`.
+
+To test a build on a router without the feed: `scp build/feed/*.ipk root@<router>:/overlay/` (flash, not `/tmp`),
+then `opkg install /overlay/netbird-glinet_*.ipk`.
 
 ## Testing on a device
 

@@ -1,0 +1,12 @@
+#!/bin/sh
+# netbird-glinet prerm — $1 is "remove" or "upgrade" (opkg)
+[ -n "${IPKG_INSTROOT:-}" ] && exit 0
+if [ "${1:-remove}" = upgrade ]; then
+    # files get replaced, postinst of the new version restarts everything
+    [ -x /etc/init.d/netbird ] && /etc/init.d/netbird stop >/dev/null 2>&1
+    exit 0
+fi
+# --keep-files: opkg deletes the packaged files itself; this removes the
+# binary, hooks, GL backups, runtime state and restores GL's originals.
+/usr/libexec/netbird/setup-router.sh uninstall --keep-files
+exit 0

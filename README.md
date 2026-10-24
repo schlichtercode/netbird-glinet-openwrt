@@ -12,7 +12,7 @@ Fork of [devNalyx/netbird-openwrt](https://github.com/devNalyx/netbird-openwrt),
 - **Shows up like a GL VPN**: the VPN indicator on the Internet page lights up while NetBird is connected, and the VPN Dashboard gets a "NetBird" card (type, server, virtual IP, traffic, ON/OFF switch).
 - **NetBird DNS fully usable**: peer names and DNS routes work on the router *and* for every LAN client — the watchdog publishes NetBird's domains to GL's dnsmasq as forwarders.
 - **GL-native firewall zone** `netbird` for `wt0` (masquerade, lan→netbird, netbird→wan) so LAN clients can use NetBird routes / exit nodes and the router can be an exit node itself.
-- **One-command installer** from your computer: detects CPU/endianness, downloads and verifies the right NetBird release, streams the binary onto the router (never through RAM-backed `/tmp`), installs everything, and prints a compatibility report. `uninstall.sh` removes it again.
+- **Two ways to install**: an **opkg feed** you add in the GL.iNet panel (Applications → Software packages → Sources) and then install/upgrade `netbird-glinet` like any other package — or the **one-command installer** `install.sh` from your computer, which also prints a compatibility report. Both stream the NetBird binary straight onto flash (never through RAM-backed `/tmp`); `uninstall.sh` / `opkg remove` take everything out again.
 - Tuned for 128 MB routers: `GOGC`/`GOMEMLIMIT`, kernel WireGuard, no CLI forks from the web path, optional USB swap helper.
 
 ## Supported hardware
@@ -25,7 +25,32 @@ Fork of [devNalyx/netbird-openwrt](https://github.com/devNalyx/netbird-openwrt),
 
 Requirements on the router: `kmod-wireguard` (bundled in GL firmware), `kmod-tun`, `iptables` + `ipset`, `curl`, `lua` (all present on GL.iNet 4.x). Free flash: ~50 MB for the binary.
 
-## Install
+## Install via opkg feed
+
+The feed is published to GitHub Pages by the release workflow: **`https://schlichtercode.github.io/netbird-glinet-openwrt`**. The package `netbird-glinet` is `Architecture: all` (~55 KB of shell, Lua and panel files); its `postinst` downloads the matching NetBird binary (~46 MB) from GitHub straight onto flash and verifies the SHA256 — it never passes through `/tmp` (RAM).
+
+**In the GL.iNet panel:** Applications → *Software packages* (Plug-ins) → *Sources* → add
+
+```
+src/gz netbird_glinet https://schlichtercode.github.io/netbird-glinet-openwrt
+```
+
+then *Update*, search for `netbird-glinet`, *Install*. The first install takes a few minutes on a MIPS router (binary download + write to flash); if the panel gives up waiting, the install still finishes in the background — check with `logread -e netbird` or run `netbird-fetch-binary` over SSH.
+
+**Over SSH:**
+
+```bash
+echo 'src/gz netbird_glinet https://schlichtercode.github.io/netbird-glinet-openwrt' >> /etc/opkg/customfeeds.conf
+opkg update && opkg install netbird-glinet
+```
+
+- Needs ~50 MB free flash and internet access on the router; dependencies `curl` and `lua` are part of GL.iNet firmware.
+- **Upgrade:** *Upgrade* in the panel or `opkg update && opkg upgrade netbird-glinet`. `/etc/config/netbird` is a conffile — your settings survive, and so does the enrollment in `/etc/netbird/`.
+- **Remove:** `opkg remove netbird-glinet` (keeps `/etc/netbird` and `/etc/config/netbird`; delete those by hand for a full purge). `uninstall.sh` notices an opkg install and hands over to `opkg remove`.
+- **After a GL firmware update** that kept your settings, GL's original `vpn-client` object and dashboard bundle are back: run `/usr/libexec/netbird/setup-router.sh install --no-fetch` (or reinstall the package).
+- **Change the pinned NetBird version:** `netbird-fetch-binary --version 0.77.1` (the package default is in `/usr/share/netbird-glinet/netbird-release`).
+
+## Install with install.sh
 
 On your computer (macOS/Linux), with SSH access to the router:
 
@@ -126,6 +151,8 @@ Measured on the Opal: daemon ≈ 17 MB RSS idle, GL's own nginx ≈ 45 MB, ~30 M
 
 **`netbird version` dies with a bare `Segmentation fault` on a MIPS router.** NetBird ≥ 0.78 is built with Go 1.26, whose binaries carry a ~35 MB zero-filled BSS segment. With the kernel's default overcommit heuristic a 128 MB router refuses that mapping at `exec()` and kills the process before `main()`. The installer sets `vm.overcommit_memory=1` in `/etc/sysctl.d/90-netbird.conf`; verify with `sysctl vm.overcommit_memory`. (Bisected with identical NetBird source: Go 1.25 → runs, Go 1.26 → SIGSEGV; details in `notes/20-recherche.md`.) Alternative: `./install.sh --version 0.77.1` (last Go-1.25 release).
 
+**Installed from the feed, but the service does not start / `netbird: not found`.** The binary download in `postinst` failed (no internet on the router, not enough flash, GitHub unreachable). Run `netbird-fetch-binary` over SSH — it prints the reason — then `/etc/init.d/netbird restart`.
+
 **Panel shows "Setup key required".** Enter a reusable setup key. Without one, `netbird up` would start an interactive SSO device flow — the watchdog deliberately never does that.
 
 **"missing port in address" / connection cycling.** The management URL needs an explicit port (`https://host:443`).
@@ -150,13 +177,23 @@ curl -s -X POST -d '{}' http://127.0.0.1:18090/daemon.DaemonService/Status   # r
 ./uninstall.sh root@192.168.8.1 --purge  # removes those too
 ```
 
+Installed from the opkg feed? `opkg remove netbird-glinet` does the same (its `prerm` runs `setup-router.sh uninstall`); `uninstall.sh` detects that case and calls opkg for you.
+
 ## Repository layout
 
 ```
 install.sh / uninstall.sh      run on your computer, talk to the router over SSH
+packaging/build.sh             builds the opkg package netbird-glinet_<ver>_all.ipk + Packages index (no SDK)
+packaging/check.sh             validates a built feed directory (unpacks the .ipk, checks the index)
+packaging/ipkg/                preinst / postinst / prerm of the package (thin wrappers around setup-router.sh)
+.github/workflows/feed.yml     on tag v*: build, publish the feed to GitHub Pages, attach the .ipk to the release
 files/                         1:1 image of what lands on the router
   etc/init.d/netbird           procd service (daemon + watchdog instances)
-  etc/config/netbird           UCI template (only installed if absent)
+  etc/config/netbird           UCI template (only installed if absent; conffile in the package)
+  etc/sysctl.d/90-netbird.conf keepalive, ip_forward, vm.overcommit_memory=1
+  usr/libexec/netbird/setup-router.sh   router-side setup/uninstall shared by install.sh and the package scripts
+  usr/sbin/netbird-fetch-binary        downloads + verifies the NetBird release binary on the router
+  usr/share/netbird-glinet/netbird-release   pinned NetBird version (read by install.sh and netbird-fetch-binary)
   usr/libexec/netbird/         common.sh, watchdog.sh, action.sh, cleanup.sh, exitnode.sh, dnsdomains.lua
   usr/lib/oui-httpd/rpc/netbird   GL panel RPC object (Lua)
   usr/share/gl-validator.d/netbird.lua

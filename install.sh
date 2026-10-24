@@ -7,28 +7,37 @@
 #   --probe            only print the compatibility report, change nothing
 #   --skip-binary      do not (re)install the NetBird binary
 #   --force            reinstall the binary even if the version matches
-#   --version X.Y.Z    NetBird release to install (default: 0.81.4)
+#   --version X.Y.Z    NetBird release to install (default: files/usr/share/netbird-glinet/netbird-release)
 #   --arch NAME        override the release arch, e.g. mipsle_softfloat
 #   SSH_OPTS="..."     extra ssh options
 #
 # What it does (idempotent, re-run any time):
 #   1. probes the router (CPU/endianness, RAM, flash, modules, web stack)
-#   2. downloads the matching release tarball + checksum on THIS machine
-#   3. streams the binary straight into /usr/bin on the router (never via /tmp,
-#      which is RAM on OpenWrt)
-#   4. installs the procd service, watchdog, GL admin-panel page (7 languages),
-#      UCI config, sysctl tuning; removes leftovers of the old upstream layout
-#   5. enables + starts the service and reloads nginx so the panel shows NetBird
+#   2. pushes files/ (service, watchdog, panel page, helpers) and applies
+#      the sysctl tuning (overcommit must precede the binary test)
+#   3. downloads the matching release tarball + checksum on THIS machine and
+#      streams the binary straight into /usr/bin on the router (never via
+#      /tmp, which is RAM on OpenWrt)
+#   4. creates the UCI config if missing, then runs the router-side setup
+#      (/usr/libexec/netbird/setup-router.sh install): small-router UCI
+#      defaults, old-layout cleanup, switch hook, GL VPN-client wrapper,
+#      service enable/restart, nginx restart if the panel object changed
+#
+# Alternative without this script: the opkg feed (README, "Install via opkg
+# feed") — its postinst runs the same setup-router.sh on the router.
 set -eu
 
-# NetBird releases built with Go 1.26 (0.78.0+) carry a ~35 MB .noptrbss
-# segment. With the kernel's default overcommit heuristic a 128 MB router
-# refuses that mapping at exec time → instant "Segmentation fault". We set
-# vm.overcommit_memory=1 before installing the binary (see sysctl below).
-# NETBIRD_VERSION_MIPS32 exists as an escape hatch: set it to 0.77.1 (last
-# Go-1.25 release) if you prefer to keep overcommit at its default.
-NETBIRD_VERSION_DEFAULT="0.81.4"
-NETBIRD_VERSION_MIPS32="${NETBIRD_VERSION_MIPS32:-0.81.4}"
+HERE="$(cd "$(dirname "$0")" && pwd)"
+FILES="$HERE/files"
+CACHE="$HERE/.cache"
+[ -d "$FILES" ] || { echo "ERROR: files/ directory not found next to install.sh" >&2; exit 1; }
+
+# Pinned NetBird releases (one place, shared with netbird-fetch-binary on the
+# router). Env NETBIRD_VERSION_MIPS32 / NETBIRD_VERSION override them.
+ENV_MIPS32="${NETBIRD_VERSION_MIPS32:-}"
+NETBIRD_VERSION_DEFAULT=""; NETBIRD_VERSION_MIPS32=""
+. "$FILES/usr/share/netbird-glinet/netbird-release"
+[ -n "$ENV_MIPS32" ] && NETBIRD_VERSION_MIPS32="$ENV_MIPS32"
 NETBIRD_VERSION="${NETBIRD_VERSION:-}"
 ROUTER=""
 MGMT_URL=""
@@ -53,9 +62,6 @@ done
 ROUTER="${ROUTER:-root@192.168.8.1}"
 case "$ROUTER" in *@*) ;; *) ROUTER="root@$ROUTER" ;; esac
 
-HERE="$(cd "$(dirname "$0")" && pwd)"
-FILES="$HERE/files"
-CACHE="$HERE/.cache"
 CTRL="${TMPDIR:-/tmp}/netbird-install-$$.sock"
 # RSA-only dropbear on GL.iNet 18.06 firmware needs the legacy host-key alg.
 SSH_BASE="-o HostKeyAlgorithms=+ssh-rsa -o PubkeyAcceptedAlgorithms=+ssh-rsa -o ControlMaster=auto -o ControlPath=$CTRL -o ControlPersist=180 -o ConnectTimeout=10 ${SSH_OPTS:-}"
@@ -69,8 +75,6 @@ say()  { printf '\033[1;36m>>\033[0m %s\n' "$*"; }
 ok()   { printf '   \033[1;32m✔\033[0m %s\n' "$*"; }
 warn() { printf '   \033[1;33m!\033[0m %s\n' "$*"; }
 die()  { printf '\033[1;31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
-
-[ -d "$FILES" ] || die "files/ directory not found next to install.sh"
 
 # ── 1. Probe ──────────────────────────────────────────────────────────────────
 say "Connecting to $ROUTER (you may be asked for the router password once)…"
@@ -148,27 +152,17 @@ echo
 [ "$MEM_AVAIL" -lt 40000 ] && warn "only $((MEM_AVAIL/1024)) MB RAM available — watch 'logread -e netbird' for rss=, consider netbird-setup-swap on a USB stick"
 [ "$PROBE_ONLY" = 1 ] && { say "Probe only — nothing changed."; exit 0; }
 
-# ── sysctl (must precede the binary test: see overcommit note above) ─────────
-write_sysctl() {
-    rssh 'mkdir -p /etc/sysctl.d && cat > /etc/sysctl.d/90-netbird.conf <<SYS
-# NetBird on a small router — installed by netbird-glinet-openwrt
-# Keep the management gRPC stream alive through CGNAT/NAT timeouts:
-net.ipv4.tcp_keepalive_time=60
-net.ipv4.tcp_keepalive_intvl=10
-net.ipv4.tcp_keepalive_probes=3
-net.ipv4.ip_forward=1
-# Go 1.26 binaries reserve a ~35 MB zero-filled BSS at exec time. With the
-# default heuristic (0) the kernel rejects that on a 128 MB box and the
-# process dies with SIGSEGV before main() runs. "Always overcommit" lets the
-# mapping succeed; the pages are only backed when actually touched.
-vm.overcommit_memory=1
-SYS
-sysctl -p /etc/sysctl.d/90-netbird.conf >/dev/null 2>&1 || true'
-}
-write_sysctl
-ok "sysctl tuning written to /etc/sysctl.d/90-netbird.conf (keepalive, ip_forward, overcommit=1)"
+# ── 2. Files + sysctl (overcommit must precede the binary test) ──────────────
+say "Installing service, watchdog, admin-panel page and helpers…"
+rssh 'mkdir -p /usr/libexec/netbird /usr/lib/oui-httpd/rpc /usr/share/gl-validator.d /usr/share/oui/menu.d /usr/share/netbird-glinet /www/views /www/i18n /etc/netbird /etc/sysctl.d /var/log/netbird'
+( cd "$FILES" && COPYFILE_DISABLE=1 tar --format ustar --uid 0 --gid 0 --uname root --gname root -cf - \
+    --exclude='./etc/config/netbird' --exclude='./www/views/*.js' --exclude='.DS_Store' --exclude='._*' . ) \
+    | rssh 'tar -C / -xf -' || die "file upload failed"
+gzip -9 -c "$FILES/www/views/gl-sdk4-ui-netbird.common.js" | rssh 'cat > /www/views/gl-sdk4-ui-netbird.common.js.gz; rm -f /www/views/gl-sdk4-ui-netbird.common.js'
+rssh 'chmod 755 /usr/libexec/netbird/setup-router.sh; sh /usr/libexec/netbird/setup-router.sh sysctl'
+ok "files in place"
 
-# ── 2. Download ───────────────────────────────────────────────────────────────
+# ── 3. Download ───────────────────────────────────────────────────────────────
 TARBALL="netbird_${NETBIRD_VERSION}_linux_${ARCH}.tar.gz"
 SUMS="netbird_${NETBIRD_VERSION}_checksums.txt"
 BASE="https://github.com/netbirdio/netbird/releases/download/v${NETBIRD_VERSION}"
@@ -198,7 +192,7 @@ if [ "$need_binary" = 1 ]; then
     SIZE_KB=$(( $(wc -c < "$BIN") / 1024 ))
     ok "binary ready: $BIN ($((SIZE_KB/1024)) MB)"
 
-    # ── 3. Push binary ──────────────────────────────────────────────────────
+    # ── 4. Push binary ──────────────────────────────────────────────────────
     say "Stopping NetBird on the router (if running)…"
     rssh '[ -x /etc/init.d/netbird ] && /etc/init.d/netbird stop >/dev/null 2>&1; killall -q netbird 2>/dev/null; sleep 1; rm -f /var/run/netbird.sock; true'
     if [ "$OVERLAY_FREE" -lt $((SIZE_KB + 3072)) ]; then
@@ -219,115 +213,24 @@ if [ "$need_binary" = 1 ]; then
     esac
 fi
 
-# ── 4. Files ──────────────────────────────────────────────────────────────────
-say "Installing service, watchdog and admin-panel page…"
-# nginx workers cache the Lua RPC object; a changed object needs an nginx
-# restart (not reload: old workers linger behind the panel's websocket and
-# eat 15 MB each on a 128 MB router). Only do it when the file changed.
-RPC_MD5_BEFORE=$(rssh 'md5sum /usr/lib/oui-httpd/rpc/netbird 2>/dev/null | cut -d" " -f1')
-rssh 'mkdir -p /usr/libexec/netbird /usr/lib/oui-httpd/rpc /usr/share/gl-validator.d /usr/share/oui/menu.d /www/views /www/i18n /etc/netbird /var/log/netbird'
-( cd "$FILES" && COPYFILE_DISABLE=1 tar --format ustar --uid 0 --gid 0 --uname root --gname root -cf - \
-    --exclude='./etc/config/netbird' --exclude='./www/views/*.js' --exclude='.DS_Store' --exclude='._*' . ) \
-    | rssh 'tar -C / -xf -' || die "file upload failed"
-gzip -9 -c "$FILES/www/views/gl-sdk4-ui-netbird.common.js" | rssh 'cat > /www/views/gl-sdk4-ui-netbird.common.js.gz; rm -f /www/views/gl-sdk4-ui-netbird.common.js'
-rssh 'chmod 755 /etc/init.d/netbird /usr/libexec/netbird/*.sh /usr/sbin/netbird-status /usr/sbin/netbird-setup-swap; chmod 644 /usr/lib/oui-httpd/rpc/netbird /usr/share/gl-validator.d/netbird.lua /usr/share/oui/menu.d/netbird.json /www/i18n/gl-sdk4-ui-netbird.*.json /www/views/gl-sdk4-ui-netbird.common.js.gz'
-ok "files in place"
-
-# UCI config: create only if missing (keeps existing settings / credentials)
+# ── 5. UCI config: create only if missing (keeps existing settings / credentials)
 if rssh 'uci -q get netbird.settings >/dev/null 2>&1'; then
     ok "existing /etc/config/netbird kept"
 else
     rssh 'cat > /etc/config/netbird' < "$FILES/etc/config/netbird"
     ok "UCI config created"
 fi
-[ -n "$MGMT_URL" ] && rssh "uci set netbird.connection.management_url='$MGMT_URL' && uci commit netbird" && ok "management URL set to $MGMT_URL"
-if [ "$MEM_TOTAL" -lt 262144 ]; then
-    rssh 'cur=$(uci -q get netbird.settings.gomemlimit); case "$cur" in ""|48MiB) uci set netbird.settings.gomemlimit=32MiB; uci commit netbird ;; esac'
-    ok "low-memory router: GOMEMLIMIT=32MiB, GOGC=50"
-fi
-KMAJ=${KERNEL%%.*}
-[ "$KMAJ" -lt 5 ] && rssh 'uci set netbird.settings.disable_ebpf_proxy=1; uci commit netbird' && ok "kernel $KERNEL: eBPF proxy disabled"
 
-
-# ── 5. Remove leftovers of the old upstream layout (nginx CGI UI, cron, rc.local) ──
-rssh 'sh -s' <<'REMOTE'
-for f in /etc/nginx/gl-conf.d/netbird.conf /www/cgi-bin/netbird-api /www/cgi-bin/netbird-ui \
-         /usr/share/oui/menu.d/netbirdview.json /www/views/gl-sdk4-ui-netbirdview.common.js.gz \
-         /usr/libexec/netbird-watchdog.sh /usr/libexec/netbird-cleanup.sh /usr/libexec/netbird-toggle-exit.sh /usr/libexec/netbird-setup-api.sh; do
-    [ -e "$f" ] && { rm -f "$f"; echo "   removed old $f"; }
-done
-rm -f /www/i18n/gl-sdk4-ui-netbirdview.*.json
-[ -d /www/netbird ] && { rm -rf /www/netbird; echo "   removed old /www/netbird"; }
-if [ -f /etc/crontabs/root ] && grep -q netbird-watchdog /etc/crontabs/root; then
-    sed -i '/netbird-watchdog/d' /etc/crontabs/root; echo "   removed old cron line"
-fi
-if grep -qi netbird /etc/rc.local 2>/dev/null; then
-    cp /etc/rc.local /etc/rc.local.pre-netbird
-    grep -vi netbird /etc/rc.local > /etc/rc.local.new && mv /etc/rc.local.new /etc/rc.local && chmod +x /etc/rc.local
-    echo "   removed NetBird lines from /etc/rc.local (backup: /etc/rc.local.pre-netbird)"
-fi
-exit 0
-REMOTE
-
-# ── 5b. Hardware toggle switch: hook into GL's "VPN client" switch function ──
-# /etc/gl-switch.d/vpn.sh is GL.iNet's handler; we append two lines (kept
-# across re-runs, removed by uninstall.sh, re-applied after a firmware update).
-rssh 'f=/etc/gl-switch.d/vpn.sh
-if [ -f "$f" ] && ! grep -q "netbird/switch.sh" "$f"; then
-    cp "$f" "$f.pre-netbird"
-    printf "\n# netbird-glinet-openwrt: let the switch also control NetBird (uninstall.sh removes this)\n[ -x /usr/libexec/netbird/switch.sh ] && /usr/libexec/netbird/switch.sh \"\$1\"\n" >> "$f"
-    echo "   hooked /etc/gl-switch.d/vpn.sh (backup: $f.pre-netbird)"
-fi'
-ok "hardware switch: NetBird follows the \"VPN client\" switch function"
-
-# ── 5c. GL panel VPN indicator + dashboard card ───────────────────────────────
-# Wrap GL's vpn-client RPC object (original kept as vpn-client.gl) and label the
-# "netbird" tunnel type in the dashboard bundle (backup kept). Idempotent;
-# a GL firmware update brings the originals back — just re-run install.sh.
-VPNC_CHANGED=$(rssh 'sh -s' <<'REMOTE'
-changed=0
-f=/usr/lib/oui-httpd/rpc/vpn-client
-if [ -f "$f" ] && ! grep -q "NETBIRD-VPN-CLIENT-WRAPPER" "$f"; then
-    cp "$f" "$f.gl"; changed=1
-fi
-if [ -f "$f.gl" ] && ! cmp -s /usr/libexec/netbird/vpn-client-wrapper.lua "$f"; then
-    cp /usr/libexec/netbird/vpn-client-wrapper.lua "$f"; chmod 644 "$f"; changed=1
-fi
-v=/www/views/gl-sdk4-ui-vpndashboard.common.js.gz
-if [ -f "$v" ] && ! zcat "$v" | grep -q '"netbird"===o?"NetBird"'; then
-    [ -f "$v.pre-netbird" ] || cp "$v" "$v.pre-netbird"
-    zcat "$v.pre-netbird" | sed \
-        -e 's/d={wireguard:"WireGuard",openvpn:"OpenVPN"}/d={wireguard:"WireGuard",openvpn:"OpenVPN",netbird:"NetBird"}/' \
-        -e 's/b\.label=S?M?""+M\.replace(\/,\/g," \/ "):C:`${T} \/ ${C}`/b.label=S?M?""+M.replace(\/,\/g," \/ "):C:"netbird"===o?"NetBird":`${T} \/ ${C}`/' \
-        | gzip -9 > "$v.tmp" && mv "$v.tmp" "$v"
-    if zcat "$v" | grep -q 'netbird:"NetBird"'; then
-        echo "   labelled NetBird in the VPN dashboard bundle (backup: $v.pre-netbird)" >&2
-    else
-        mv "$v.pre-netbird" "$v"; echo "   dashboard bundle layout unknown — left untouched" >&2
-    fi
-fi
-echo $changed
-REMOTE
-)
-[ "$VPNC_CHANGED" = 1 ] && RPC_MD5_BEFORE=changed
-ok "GL panel: VPN indicator + dashboard card show NetBird"
-
-# ── 6. Enable + start, reload nginx (panel picks up the RPC object + menu) ────
-say "Enabling and starting the service…"
-rssh '/etc/init.d/netbird enable; /etc/init.d/netbird restart' >/dev/null 2>&1 || warn "service restart returned an error — check: ssh $ROUTER logread -e netbird"
-RPC_MD5_AFTER=$(rssh 'md5sum /usr/lib/oui-httpd/rpc/netbird 2>/dev/null | cut -d" " -f1')
-if [ "$RPC_MD5_BEFORE" != "$RPC_MD5_AFTER" ]; then
-    rssh '[ -x /etc/init.d/nginx ] && /etc/init.d/nginx restart >/dev/null 2>&1; true'
-    ok "nginx restarted (RPC object changed) — reload the panel page"
-fi
-sleep 3
-STATE=$(rssh '. /usr/libexec/netbird/common.sh; nb_load_config; echo "daemon=$(nb_daemon_count) mgmt=$(nb_mgmt_state) wg=$(nb_wg_mode) rss=$(nb_daemon_rss_kb)kB avail=$(nb_mem_available_kb)kB"' 2>/dev/null || true)
-ok "service state: $STATE"
+# ── 6. Router-side setup (shared with the opkg package's postinst) ───────────
+say "Running setup-router.sh on the router…"
+set -- install --no-fetch
+[ -n "$MGMT_URL" ] && set -- "$@" --management-url "$MGMT_URL"
+rssh "sh /usr/libexec/netbird/setup-router.sh $*" || warn "setup-router.sh reported an error — check: ssh $ROUTER logread -e netbird"
 
 HOST=${ROUTER#*@}
 echo
 echo "────────────────────────────────────────────────────────────────"
-echo " Done. Open the GL.iNet admin panel → Applications → NetBird"
+echo " Done. Open the GL.iNet admin panel → VPN → NetBird"
 echo "   http://$HOST/#/netbird"
 echo " Enter your management URL (with port) and a reusable setup key."
 echo
