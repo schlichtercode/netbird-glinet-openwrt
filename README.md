@@ -1,241 +1,148 @@
-# netbird-openwrt
+# netbird-glinet-openwrt
 
-> NetBird WireGuard overlay for OpenWrt routers — persistent config, web UI, procd service, exit node.
+> NetBird (WireGuard overlay network) on GL.iNet routers — native page in the GL.iNet admin panel, procd service, watchdog, LAN DNS forwarding, exit-node support. Built for the 128 MB **GL-SFT1200 (Opal)**, works on other GL.iNet SDK4 routers too.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![OpenWrt](https://img.shields.io/badge/OpenWrt-21.02+-green.svg)](https://openwrt.org)
-[![NetBird](https://img.shields.io/badge/NetBird-0.73+-orange.svg)](https://netbird.io)
+Fork of [devNalyx/netbird-openwrt](https://github.com/devNalyx/netbird-openwrt), reworked for small MIPS routers and for a native GL.iNet integration (no extra web UI, no nginx/CGI hacks).
 
-A self-contained plugin that runs NetBird as a proper OpenWrt service on GL.iNet routers (and any OpenWrt 21.02+ device). Installs in minutes, survives reboots, and embeds a ZeroTier-style management UI directly into the GL.iNet admin panel.
+## What you get
 
-## Features
-
-- **procd-managed daemon** — auto-starts at boot (`START=90`), auto-respawns on crash; no rc.local hacks
-- **Persistent config** — enrollment and WireGuard keys stored in `/etc/netbird/` (overlay FS); survives reboots since OpenWrt's `/var` is tmpfs
-- **ZeroTier-style web UI** — status card, peers table with connection type, one-click connect/disconnect/restart, setup key enrollment — embedded in the GL.iNet admin panel at `#/netbirdview`
-- **At-a-glance daemon health** — status card shows the running daemon version plus a MANAGED/DETACHED badge for whether procd is currently supervising it (auto-restart on crash) vs. it was started directly by a Restart/Connect action — no SSH needed to check
-- **Exit node** — router advertises `0.0.0.0/0` to peers; watchdog maintains `iptables`/`ipset` forwarding rules across all authorized peer sets
-- **Stability watchdog** — cron every 5 min: TCP keepalive tuning (prevents CGNAT gRPC stream drops), management reconnect on disconnect, log rotation
-- **UCI configuration** — all settings in `/etc/config/netbird`, readable by standard OpenWrt tools
-- **API token integration** — optional NetBird API token enables exit node toggle button and auto-discovery of peer/route IDs
-
-## Screenshots
-
-| Connected | Peers |
-|-----------|-------|
-| *(add screenshot)* | *(add screenshot)* |
+- **NetBird page inside the GL.iNet admin panel** (Applications → NetBird), in all seven panel languages (en, de, es, it, ja, zh-cn, zh-tw). Enrol with a setup key, see peers, memory and DNS state, restart, toggle the exit node, edit every setting. Protected by the panel login like every other GL page.
+- **procd service** with auto-restart (unlimited retries — an OOM kill must never leave the router without NetBird) and a **watchdog instance**: reconnects, repairs the router's resolver, keeps the firewall zone, logs memory use. No cron (GL.iNet's crond ignores `/etc/crontabs`).
+- **NetBird DNS fully usable**: peer names and DNS routes work on the router *and* for every LAN client — the watchdog publishes NetBird's domains to GL's dnsmasq as forwarders.
+- **GL-native firewall zone** `netbird` for `wt0` (masquerade, lan→netbird, netbird→wan) so LAN clients can use NetBird routes / exit nodes and the router can be an exit node itself.
+- **One-command installer** from your computer: detects CPU/endianness, downloads and verifies the right NetBird release, streams the binary onto the router (never through RAM-backed `/tmp`), installs everything, and prints a compatibility report. `uninstall.sh` removes it again.
+- Tuned for 128 MB routers: `GOGC`/`GOMEMLIMIT`, kernel WireGuard, no CLI forks from the web path, optional USB swap helper.
 
 ## Supported hardware
 
-| Device | SoC | Architecture | Status |
-|--------|-----|--------------|--------|
-| GL.iNet GL-MT3000 | MediaTek MT7981B | `aarch64_cortex-a53` | ✅ Tested |
-| GL.iNet GL-MT6000 | MediaTek MT7986A | `aarch64_cortex-a53` | ⚠️ Should work |
-| GL.iNet GL-AXT1800 | IPQ6010 | `ipq60xx` | ⚠️ Untested |
-| Any OpenWrt 21.02+ aarch64 | — | `aarch64` | ⚠️ CGI/nginx path works |
+| Device | SoC / arch | Firmware | Status |
+|---|---|---|---|
+| GL.iNet **GL-SFT1200 Opal** | SiFlower SF19A28, MIPS32r2 LE (`mipsle_softfloat`) | 4.8.3 (OpenWrt 18.06, kernel 4.14) | ✅ reference device, tested |
+| GL.iNet GL-MT3000 / MT6000 / AXT1800 … | aarch64 / ipq | 4.x | ⚠️ should work (same SDK4 panel, same scripts), untested here |
+| Other OpenWrt (no GL panel) | any | 21.02+ | ⚠️ service + CLI tools work, no panel page |
 
-> The GL.iNet admin panel integration (`#/netbirdview`) requires GL.iNet firmware v4.x (SDK4).  
-> The nginx CGI UI at `/netbird/` works on any OpenWrt router with nginx installed.
+Requirements on the router: `kmod-wireguard` (bundled in GL firmware), `kmod-tun`, `iptables` + `ipset`, `curl`, `lua` (all present on GL.iNet 4.x). Free flash: ~50 MB for the binary.
 
-## Prerequisites
+## Install
 
-- GL.iNet router with GL.iNet firmware v4.x (OpenWrt 21.02+)
-- A running NetBird management server — self-hosted ([docs](https://docs.netbird.io/selfhosted/selfhosted-guide)) or [netbird.io](https://netbird.io)
-- Management server URL **must include an explicit port**: `https://your-server.example.com:443`  
-  NetBird's gRPC dialer requires this — omitting the port causes a `missing port in address` error and connection cycling
-- SSH access to the router (`root@192.168.8.1`)
-- A **Reusable** setup key from the NetBird dashboard
-
-## Installation
-
-### 1. Clone this repo (on your workstation)
+On your computer (macOS/Linux), with SSH access to the router:
 
 ```bash
-git clone https://github.com/devNalyx/netbird-openwrt.git
-cd netbird-openwrt
+git clone https://github.com/schlichtercode/netbird-glinet-openwrt.git
+cd netbird-glinet-openwrt
+./install.sh root@192.168.8.1
 ```
 
-### 2. Install the NetBird binary on the router
+Optional second argument: your management URL **with port**, e.g. `./install.sh root@192.168.8.1 https://netbird.example.com:443`. Use `./install.sh root@192.168.8.1 --probe` to only print the compatibility report.
 
+Then open the GL.iNet panel → **Applications → NetBird**, enter the management URL (default `https://api.netbird.io:443`) and a **reusable setup key** (NetBird dashboard → Setup Keys), click *Connect*. Enrollment survives reboots.
+
+Tip for GL.iNet 18.06-based firmware (Opal): its dropbear only speaks `ssh-rsa`; the installer passes the right options, and a key-based login avoids repeated password prompts:
 ```bash
-sh scripts/install.sh root@192.168.8.1 https://your-netbird-server.example.com:443
+ssh-keygen -t rsa -b 2048 -f ~/.ssh/id_rsa_glinet -N ""
+cat ~/.ssh/id_rsa_glinet.pub | ssh -o HostKeyAlgorithms=+ssh-rsa root@192.168.8.1 'cat >> /etc/dropbear/authorized_keys'
 ```
 
-This downloads the correct static NetBird binary for `aarch64_cortex-a53`, deploys the procd init script, creates the UCI config skeleton, and installs the watchdog cron job.
-
-### 3. Deploy the web UI
-
-```bash
-sh nginx-app-netbird/deploy.sh root@192.168.8.1
-```
-
-Deploys: nginx location config, CGI backend, web UI (`index.html`), helper scripts, enables the procd service, migrates config to `/etc/netbird/` (persistent), and cleans up any competing rc.local startup code.
-
-### 4. Enroll with a setup key
-
-Open the GL.iNet admin panel → **Applications → NetBird**  
-(or navigate directly to `http://192.168.8.1/netbird/`)
-
-1. Confirm the **Management Server URL** matches your server (with explicit `:443`)
-2. Paste a **Reusable** setup key from your NetBird dashboard → Setup Keys
-3. Click **Apply**
-
-The router enrolls, saves credentials to `/etc/netbird/default.json` (persistent across reboots), and connects. Future reboots reconnect automatically — no setup key needed again.
-
-## Configuration
-
-UCI config at `/etc/config/netbird`:
-
-```uci
-config settings
-    option enabled    '1'
-    option log_level  'info'
-
-config connection
-    option management_url 'https://your-netbird-server.example.com:443'
-    option api_token      ''   # Optional: enables Exit Node toggle in UI
-    option route_id       ''   # Auto-discovered by setup-api.sh
-    option peer_id        ''   # Auto-discovered by setup-api.sh
-```
-
-Read/write with UCI:
-```bash
-uci get netbird.@connection[0].management_url
-uci set netbird.@connection[0].management_url='https://your-server.example.com:443'
-uci commit netbird
-```
-
-## Exit node
-
-The router can act as a NetBird exit node, routing all peer traffic through its WAN connection. To enable the **Exit Node toggle** button in the web UI:
-
-1. Create an API token in your NetBird dashboard (avatar → **API Tokens**)
-2. Open the web UI → **Advanced Settings** → paste the API token → **Save**
-3. The watchdog automatically discovers your `peer_id` and `route_id` and stores them in UCI
-
-The watchdog ensures `iptables`/`ipset` forwarding rules in `NETBIRD-RT-FWD-IN` cover all authorized peer sets after every NetBird reconnect event.
-
-> **Note:** Run `netbird up` with `--disable-client-routes` on the router — this prevents peer-advertised `0.0.0.0/0` exit-node routes from overwriting the router's own WAN default gateway. The deploy script and init.d script enforce this automatically.
-
-## Architecture
+## How it works
 
 ```
-Boot sequence
-  S90netbird (/etc/init.d/netbird, procd START=90)
-    ├── symlink /var/lib/netbird → /etc/netbird  (bypasses tmpfs /var)
-    ├── netbird service run --log-file /var/log/netbird/client.log
-    └── netbird up --management-url <UCI> --disable-client-routes
+/etc/init.d/netbird (procd, START=90)
+ ├─ instance "daemon":   netbird service run --enable-json-socket --json-socket tcp://127.0.0.1:18090
+ │      env: GOGC=50 GOMEMLIMIT=48MiB NB_SKIP_NFTABLES_CHECK NB_DISABLE_EBPF_WG_PROXY …   (from UCI)
+ └─ instance "watchdog": /usr/libexec/netbird/watchdog.sh loop   (every 5 min)
+        reconnect · duplicate-daemon self-heal · firewall zone · chains check
+        resolv.conf repair · dnsmasq forwarding of NetBird domains · memory log (logread -e netbird)
 
-Runtime
-  wt0 (WireGuard interface)
-    ├── gRPC ──────────────────────► NetBird Management Server :443
-    └── WebSocket relay (rels://)──► peers (fallback when STUN unavailable)
-
-Web UI stack
-  GL.iNet panel → nginx /netbird/ → /www/netbird/index.html  (SPA)
-  GL.iNet panel → nginx /netbird/api → uhttpd CGI → netbird-api.cgi
-
-Watchdog (cron */5 * * * *)
-  ├── TCP keepalive: time=60s intvl=10s probes=3  (CGNAT gRPC keepalive)
-  ├── Management reconnect: netbird up if not Connected
-  └── ipset rules: NETBIRD-RT-FWD-IN ACCEPT for all non-empty nb* sets
+GL.iNet panel  ──$rpcRequest("netbird", …)──►  /usr/lib/oui-httpd/rpc/netbird  (Lua)
+                                                 ├─ get_status: curl → daemon JSON gateway (loopback), /proc, ubus
+                                                 ├─ set_config: validated → UCI /etc/config/netbird
+                                                 └─ action:     /usr/libexec/netbird/action.sh (background, lock)
+/www/views/gl-sdk4-ui-netbird.common.js  (Vue view, GL components)   /www/i18n/gl-sdk4-ui-netbird.<lang>.json
 ```
 
-## Project structure
+State lives in `/etc/netbird/` (overlay flash); `/var/lib/netbird` is a symlink to it because `/var` is RAM on OpenWrt.
 
-```
-netbird-openwrt/
-├── nginx-app-netbird/          # Web UI + CGI backend (any OpenWrt with nginx)
-│   ├── index.html              # ZeroTier-style management SPA
-│   ├── netbird-api.cgi         # JSON API: GET status, POST actions
-│   ├── netbird.conf            # nginx location blocks
-│   ├── netbird-setup-api.sh    # Auto-discovers peer_id + route_id via API
-│   ├── netbird-toggle-exit.sh  # Toggles exit node route via management API
-│   ├── setup-api.sh            # Interactive setup-api (run directly on router)
-│   └── deploy.sh               # SSH deploy: files + procd enable + config migrate
-├── gl-sdk4-netbird/            # GL.iNet SDK4 admin panel integration
-│   └── root/
-│       ├── etc/config/netbird  # UCI config template
-│       ├── etc/init.d/netbird  # procd init script (canonical)
-│       └── usr/share/oui/menu.d/netbirdview.json  # Panel sidebar entry
-└── scripts/
-    ├── install.sh              # Full install: binary + init + UCI + cron
-    ├── netbird-watchdog.sh     # Cron watchdog (reconnect, ipset, keepalive)
-    ├── netbird-cleanup.sh      # Full teardown before a clean restart (processes + iptables chains)
-    ├── setup-exit-node.sh      # One-shot exit node configuration
-    ├── start-daemon.sh         # Manual daemon start (debug/fallback)
-    └── status.sh               # Quick status overview
-```
+### Configuration (`/etc/config/netbird`)
+
+Everything is editable in the panel's *Advanced settings*; the UCI file is the source of truth.
+
+| Section.option | Default | Meaning |
+|---|---|---|
+| `settings.enabled` | 1 | service on/off |
+| `settings.gogc` / `gomemlimit` | 50 / `48MiB` on <256 MB RAM | Go GC tuning for the daemon |
+| `settings.json_socket` | 1 | daemon JSON API on 127.0.0.1:18090 (status without forking the CLI) |
+| `settings.wg_userspace` | 0 | force wireguard-go instead of the kernel module |
+| `settings.disable_ebpf_proxy` | 1 (kernel < 5) | classic UDP proxy |
+| `connection.management_url` | `https://api.netbird.io:443` | **must include the port** |
+| `connection.disable_client_routes` | 1 | ignore other peers' routes (keeps the WAN default route safe) |
+| `connection.disable_server_routes` | 0 | 1 = never forward for peers (no LAN access / exit node) |
+| `connection.disable_dns` | 0 | NetBird DNS on; proxy at `dns_resolver_address` (127.0.0.153) |
+| `connection.lan_dns_forward` | 1 | dnsmasq forwards NetBird domains → LAN clients resolve peers + DNS routes |
+| `connection.firewall_zone` | 1 | maintain zone `netbird` (wt0) + forwardings |
+| `connection.block_lan_access` | 0 | peers may not reach this router's LAN |
+| `connection.api_token` | — | NetBird API token: enables the exit-node switch in the panel |
+
+Apply changes with `/etc/init.d/netbird restart` (the panel does this for you).
+
+### DNS
+
+NetBird's resolver listens on `127.0.0.153:53` (dnsmasq owns `127.0.0.1`). NetBird points the **router's own** `/etc/resolv.conf` at it and forwards everything else to its previous upstream (dnsmasq). On OpenWrt that file lives in RAM and gets rewritten by dnsmasq restarts, so the watchdog re-points it whenever NetBird is connected. For **LAN clients** the watchdog reads the domains NetBird serves (peer domain + every DNS route from your management server) and writes `server=/<domain>/127.0.0.153` lines to `/tmp/dnsmasq.d/netbird.conf`, reloading dnsmasq only when the list changes.
+
+### Exit node
+
+*This router as exit node for peers:* enable server routes (default), create the exit-node route in the NetBird dashboard. The firewall zone provides masquerading. With an API token stored in the panel, the page shows a toggle for that route.
+
+*LAN clients through a remote exit node:* `netbird networks select -a <id>` over SSH (see `netbird networks list`); the firewall zone's lan→netbird forwarding does the rest. Keep *ignore routes from other peers* on unless you want that.
+
+## Memory on 128 MB routers
+
+Measured on the Opal: daemon ≈ 17 MB RSS idle, GL's own nginx ≈ 45 MB, ~30 MB left. Check with `netbird-status` or `logread -e netbird` (`rss=… mem_avail=…` every 5 min). If it gets tight: plug in a USB stick and run `netbird-setup-swap` (creates a 256 MB swap file there and persists it in `/etc/config/fstab`). Swap on the router's own NAND is impossible (UBIFS) and would wear it out.
 
 ## Troubleshooting
 
-**UI shows "Connecting..." after reboot**  
-Check `tail -20 /var/log/netbird/client.log`. If you see `missing port in address`, the management URL is missing the explicit port — set it via UCI:
+**`netbird version` dies with a bare `Segmentation fault` on a MIPS router.** NetBird ≥ 0.78 is built with Go 1.26, whose binaries carry a ~35 MB zero-filled BSS segment. With the kernel's default overcommit heuristic a 128 MB router refuses that mapping at `exec()` and kills the process before `main()`. The installer sets `vm.overcommit_memory=1` in `/etc/sysctl.d/90-netbird.conf`; verify with `sysctl vm.overcommit_memory`. (Bisected with identical NetBird source: Go 1.25 → runs, Go 1.26 → SIGSEGV; details in `notes/20-recherche.md`.) Alternative: `./install.sh --version 0.77.1` (last Go-1.25 release).
+
+**Panel shows "Setup key required".** Enter a reusable setup key. Without one, `netbird up` would start an interactive SSO device flow — the watchdog deliberately never does that.
+
+**"missing port in address" / connection cycling.** The management URL needs an explicit port (`https://host:443`).
+
+**NETBIRD-* iptables chains disappeared after a WAN change.** fw3 reloads flush them; the watchdog notices within 5 min and re-applies via `netbird down/up`. Run `/usr/libexec/netbird/watchdog.sh once` to do it now.
+
+**Two daemons / "Chain already exists".** `pkill` is missing on GL BusyBox; all scripts use `killall`. The watchdog kills duplicates and restarts. Manual full teardown: `/usr/libexec/netbird/cleanup.sh`.
+
+**Useful commands on the router**
 ```bash
-uci set netbird.@connection[0].management_url='https://your-server.example.com:443'
-uci commit netbird
-/etc/init.d/netbird restart
+netbird-status                         # overview incl. memory, DNS, chains
+logread -e netbird                     # watchdog + memory log
+/etc/init.d/netbird restart            # restart daemon + watchdog
+/usr/libexec/netbird/watchdog.sh once  # run all checks now
+curl -s -X POST -d '{}' http://127.0.0.1:18090/daemon.DaemonService/Status   # raw daemon status
 ```
 
-**"LoginFailed" after firmware update or factory reset**  
-The overlay FS was wiped. Re-enroll: open the web UI, paste a setup key, click Apply. After that, reboots work automatically again.
+## Uninstall
 
-**Exit node traffic not forwarding**  
-The watchdog re-applies ipset rules every 5 minutes. To fix immediately:
 ```bash
-sh /usr/libexec/netbird-watchdog.sh
+./uninstall.sh root@192.168.8.1          # keeps /etc/netbird (enrollment) and /etc/config/netbird
+./uninstall.sh root@192.168.8.1 --purge  # removes those too
 ```
 
-**Check daemon status**
-```bash
-netbird status --detail
-tail -30 /var/log/netbird/client.log
+## Repository layout
+
 ```
-
-**Router itself can't resolve public hostnames (`wget`/`opkg`/cron scripts fail), but LAN clients still resolve fine**  
-NetBird manages `/etc/resolv.conf` when its DNS features are active: it points the router's own system resolver at its embedded DNS proxy (typically `127.0.0.153`) so it can serve split-DNS for `*.netbird.selfhosted`-style peer names, and it's supposed to back up whatever resolver was there before to `/etc/resolv.conf.original.netbird` so it can forward everything else upstream. If that backup file goes missing — e.g. from an unclean shutdown, a manual edit, a factory reset, or restoring `/etc/resolv.conf` from a backup that predates NetBird's own — the proxy has no upstream to forward to, and every hostname lookup outside the NetBird domain fails **for processes running on the router itself only**.
-
-This is easy to miss because it doesn't look like a NetBird problem: LAN devices are untouched, since they resolve via whatever your router already runs for the LAN (dnsmasq, AdGuard Home, Pi-hole, unbound, etc.), which listens on its own address/port and is driven by DHCP, not by the router's own `/etc/resolv.conf`. Only things running locally on the router — this install script's `wget`, `opkg`, the watchdog cron — are affected.
-
-To confirm:
-```bash
-cat /etc/resolv.conf                              # look for "# Generated by NetBird"
-ls /etc/resolv.conf.original.netbird               # missing = confirmed
-grep 'failed to restore host DNS settings' /var/log/netbird/client.log
+install.sh / uninstall.sh      run on your computer, talk to the router over SSH
+files/                         1:1 image of what lands on the router
+  etc/init.d/netbird           procd service (daemon + watchdog instances)
+  etc/config/netbird           UCI template (only installed if absent)
+  usr/libexec/netbird/         common.sh, watchdog.sh, action.sh, cleanup.sh, exitnode.sh, dnsdomains.lua
+  usr/lib/oui-httpd/rpc/netbird   GL panel RPC object (Lua)
+  usr/share/gl-validator.d/netbird.lua
+  usr/share/oui/menu.d/netbird.json
+  www/views/gl-sdk4-ui-netbird.common.js   panel page (gzipped on install)
+  www/i18n/gl-sdk4-ui-netbird.*.json       7 languages
+  usr/sbin/netbird-status, netbird-setup-swap
+notes/                         working notes: device facts, research, decisions (German)
 ```
-
-To fix, recreate the backup pointing at whatever your router's real local resolver is (its loopback listener, not the WireGuard proxy), then restart NetBird so it picks it up as the DNS proxy's upstream:
-```bash
-echo 'nameserver 127.0.0.1' > /etc/resolv.conf.original.netbird   # adjust if your local resolver binds elsewhere
-sh scripts/netbird-cleanup.sh
-netbird service run --log-file /var/log/netbird/client.log --log-level info &
-netbird up --management-url <your-mgmt-url> --disable-client-routes
-```
-
-**`netbird status` fails with `create firewall manager: ... Chain already exists` after a manual restart or upgrade**  
-This means two `netbird service run` processes ended up running at once — usually because a plain `pkill -x netbird` didn't actually kill the previous daemon (it can be slow to exit, or ignore the signal mid-shutdown) before a new one was started. Both instances then try to create the same `NETBIRD-*` iptables chains, and the second one fails. Symptoms: `ps w | grep netbird` shows more `netbird service run` processes than expected, and `netbird status`/`netbird up` error out even though the binary and version are otherwise fine.
-
-Don't just `pkill` and retry — that leaves stale iptables chains behind even after the extra process is gone. Do a full teardown first, then start exactly one instance:
-```bash
-sh scripts/netbird-cleanup.sh          # kills all netbird processes + flushes all NETBIRD-* chains
-netbird service run --log-file /var/log/netbird/client.log --log-level info &
-netbird up --management-url <your-mgmt-url> --disable-client-routes
-```
-
-The watchdog cron (every 5 min) also checks for this on its own and self-heals — if `pgrep -x netbird` ever finds more than one process, it runs the same cleanup + restart automatically, so a missed click-race can't quietly leak memory for more than one cron cycle. The web UI's restart/connect actions also hold a lock for the full duration of the teardown+restart (not just the HTTP request), so clicking the button again mid-restart is now rejected as "busy" instead of racing a second daemon into existence.
-
-**Root cause of the above, if you're porting this to a different device/firmware:** some BusyBox builds (confirmed on GL.iNet's GL-MT3000 firmware) don't include the `pkill` applet at all — `pkill -x netbird` then silently does nothing (command-not-found, swallowed by `2>/dev/null`) instead of erroring, so the "killed" daemon keeps running while a brand-new one starts next to it. Every script in this repo now kills the daemon with `killall -q netbird` / `killall -q -9 netbird` instead, since `killall` and `pgrep` are present wherever `pkill` is missing. If you're adapting this repo for another router, run `which pkill pgrep killall` on it first and confirm which applets it actually has before assuming any of these process-management calls do what they say.
-
-## Contributing
-
-PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
-
-Most useful contributions:
-- Testing on other GL.iNet models (GL-MT6000, GL-AXT1800, GL-AX1800)
-- Testing on vanilla OpenWrt (non-GL.iNet firmware)
-- x86_64 support in `install.sh`
-- Package build for OpenWrt's `opkg`
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE). NetBird itself is BSD-3-Clause.

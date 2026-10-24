@@ -1,0 +1,31 @@
+#!/bin/sh
+# Quick NetBird overview on the router (run over SSH).
+. /usr/libexec/netbird/common.sh
+nb_load_config
+
+line() { printf '%-18s %s\n' "$1" "$2"; }
+echo "═══ NetBird on $(cat /tmp/sysinfo/model 2>/dev/null || uname -n) ═══"
+line "binary"        "$([ -x "$NB_BIN" ] && "$NB_BIN" version 2>/dev/null || echo 'not installed')"
+line "enabled (uci)" "$NB_ENABLED"
+line "daemon"        "$([ -S "$NB_SOCK" ] && echo "running pid=$(nb_daemon_pids | head -1)" || echo stopped) ($(nb_daemon_count) process(es))"
+line "procd"         "$(ubus call service list '{"name":"netbird"}' 2>/dev/null | grep -c '"running": true') instance(s) running"
+line "management"    "$(nb_mgmt_state) ($NB_MGMT_URL)"
+line "wireguard"     "$(nb_wg_mode)"
+line "daemon RSS"    "$(nb_daemon_rss_kb) kB"
+line "MemAvailable"  "$(nb_mem_available_kb) kB"
+line "swap"          "$(awk '/SwapTotal/{t=$2} /SwapFree/{f=$2} END{print t-f " / " t " kB used"}' /proc/meminfo)"
+line "dns mode"      "$([ "$NB_DISABLE_DNS" = 1 ] && echo off || echo "on → $NB_DNS_ADDR, LAN forward=$NB_LAN_DNS_FORWARD")"
+line "resolv.conf"   "$(grep nameserver /etc/resolv.conf 2>/dev/null | tr '\n' ' ')"
+line "dnsmasq fwd"   "$(grep -c '^server=' "$NB_DNSMASQ_CONF" 2>/dev/null || echo 0) domain(s)"
+echo
+echo "── netbird status ──"
+[ -S "$NB_SOCK" ] && nb_timeout 15 "$NB_BIN" status 2>&1 || echo "(daemon not running)"
+echo
+echo "── routes ──"
+ip route show | head -5
+echo
+echo "── NETBIRD iptables chains ──"
+iptables-save 2>/dev/null | grep -c '^:NETBIRD' | sed 's/$/ chain(s)/'
+echo
+echo "── last log lines ──"
+tail -n 8 "$NB_LOG" 2>/dev/null || echo "(no log)"

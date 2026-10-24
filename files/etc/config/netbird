@@ -1,0 +1,60 @@
+# NetBird client configuration (GL.iNet / OpenWrt). Read by
+# /usr/libexec/netbird/common.sh. Changes take effect after
+#   /etc/init.d/netbird restart
+# or via the GL.iNet admin panel (Applications → NetBird).
+
+config settings 'settings'
+	option enabled '1'
+	option log_level 'info'
+	# Go garbage collector target (%): lower = less RAM, a bit more CPU.
+	option gogc '50'
+	# Soft heap limit for the Go runtime, e.g. '48MiB'. Empty = off.
+	# The installer sets 32MiB on routers with less than 256 MB RAM.
+	option gomemlimit ''
+	# 1 = force wireguard-go (userspace) instead of the kernel module.
+	option wg_userspace '0'
+	# 1 = skip NetBird's nftables probe and use iptables directly (18.06/21.02).
+	option skip_nftables_check '1'
+	# 1 = classic UDP proxy instead of the eBPF proxy (needed on kernel < 5.x).
+	option disable_ebpf_proxy '1'
+	# 1 = daemon exposes its HTTP/JSON API on 127.0.0.1:18090 (loopback only).
+	# The panel and watchdog read the status from it with curl instead of
+	# forking the 46 MB CLI binary. 0 = always use the CLI (slower, more RAM).
+	option json_socket '1'
+	# Memory guard: below this MemAvailable (kB) the watchdog stops the daemon
+	# to keep the router responsive, and lets it restart after mem_cooldown s.
+	option mem_min_kb '9216'
+	option mem_cooldown '120'
+	# Watchdog loop interval in seconds.
+	option watchdog_interval '300'
+	# Extra KEY=VALUE pairs for the daemon environment, space separated.
+	option daemon_env ''
+
+config connection 'connection'
+	# MUST include an explicit port (NetBird's gRPC dialer requires it).
+	option management_url 'https://api.netbird.io:443'
+	option hostname ''
+	# Mandatory on a router: a peer's 0.0.0.0/0 exit-node route must never
+	# replace this router's WAN default route.
+	option disable_client_routes '1'
+	# 0 = this router may act as a router / exit node for server routes.
+	option disable_server_routes '0'
+	# 0 = NetBird DNS on (peer names + DNS routes), 1 = NetBird DNS off.
+	option disable_dns '0'
+	# Loopback address for NetBird's DNS proxy (dnsmasq owns 127.0.0.1).
+	option dns_resolver_address '127.0.0.153'
+	# 1 = dnsmasq forwards NetBird domains to the proxy, so LAN clients can
+	# resolve peer names and DNS routes too.
+	option lan_dns_forward '1'
+	# 1 = maintain a GL/OpenWrt firewall zone 'netbird' for wt0 (masquerade,
+	# lan→netbird, netbird→wan) so LAN clients can use NetBird routes /
+	# exit nodes and this router can serve as exit node.
+	option firewall_zone '1'
+	option block_lan_access '0'
+	option wireguard_port '51820'
+	# Extra flags appended to `netbird up` (no whitespace inside a value).
+	option extra_up_args ''
+	# Optional NetBird API token: enables the Exit Node toggle in the panel.
+	option api_token ''
+	option peer_id ''
+	option route_id ''
