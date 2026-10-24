@@ -9,6 +9,7 @@ Fork of [devNalyx/netbird-openwrt](https://github.com/devNalyx/netbird-openwrt),
 - **NetBird page inside the GL.iNet admin panel** (VPN → NetBird), in all seven panel languages (en, de, es, it, ja, zh-cn, zh-tw). Enrol with a setup key, see peers, memory and DNS state, restart, toggle the exit node, edit every setting. Protected by the panel login like every other GL page.
 - **procd service** with auto-restart and a **watchdog instance**: reconnects, repairs the router's resolver, keeps the firewall zone, logs memory use, and a **memory guard** that stops the daemon before the router starts thrashing and brings it back after a cooldown. No cron (GL.iNet's crond ignores `/etc/crontabs`).
 - **Hardware switch**: set it to "VPN client" in the GL panel and it turns NetBird (or the preferred exit node) on and off.
+- **Shows up like a GL VPN**: the VPN indicator on the Internet page lights up while NetBird is connected, and the VPN Dashboard gets a "NetBird" card (type, server, virtual IP, traffic, ON/OFF switch).
 - **NetBird DNS fully usable**: peer names and DNS routes work on the router *and* for every LAN client — the watchdog publishes NetBird's domains to GL's dnsmasq as forwarders.
 - **GL-native firewall zone** `netbird` for `wt0` (masquerade, lan→netbird, netbird→wan) so LAN clients can use NetBird routes / exit nodes and the router can be an exit node itself.
 - **One-command installer** from your computer: detects CPU/endianness, downloads and verifies the right NetBird release, streams the binary onto the router (never through RAM-backed `/tmp`), installs everything, and prints a compatibility report. `uninstall.sh` removes it again.
@@ -95,6 +96,10 @@ NetBird's resolver listens on `127.0.0.153:53` (dnsmasq owns `127.0.0.1`). NetBi
 ### Networks and exit nodes (this router as a client)
 
 The *Networks & exit nodes* card lists every route and exit node your management server offers this router, with a switch per entry. Switching one on selects it in the daemon (the same as `netbird networks select`); LAN clients use it automatically thanks to the firewall zone. Mark one exit node as *preferred* to tie it to the hardware switch (below). Requires *Ignore routes from other peers* to be off.
+
+### VPN indicator and VPN Dashboard
+
+GL's Internet page and VPN Dashboard take their VPN state from the panel's `vpn-client` RPC object. The installer puts a small Lua wrapper in its place (the original is kept as `vpn-client.gl`) that passes everything through and adds a "NetBird" entry: the indicator lights up when NetBird is connected, and the dashboard shows a NetBird card whose ON/OFF switch starts and stops the service. In GL's *global mode* the dashboard shows only the first tunnel, so NetBird is listed first while GL's own tunnel has no configuration. Two strings in the dashboard bundle are patched to label the type (backup `*.pre-netbird`). A GL firmware update restores the originals — re-run `install.sh`; `uninstall.sh` restores them too.
 
 ### Hardware toggle switch
 

@@ -20,6 +20,11 @@ if [ -f "$f" ] && grep -q "netbird/switch.sh" "$f"; then
     sed -i '/netbird-glinet-openwrt: let the switch/d; /netbird\/switch.sh/d' "$f"
     rm -f "$f.pre-netbird"
 fi
+echo ">> restoring GL vpn-client RPC object and dashboard bundle"
+f=/usr/lib/oui-httpd/rpc/vpn-client
+[ -f "$f.gl" ] && grep -q "NETBIRD-VPN-CLIENT-WRAPPER" "$f" 2>/dev/null && mv "$f.gl" "$f"
+v=/www/views/gl-sdk4-ui-vpndashboard.common.js.gz
+[ -f "$v.pre-netbird" ] && mv "$v.pre-netbird" "$v"
 echo ">> removing files"
 rm -f /etc/init.d/netbird /usr/lib/oui-httpd/rpc/netbird /usr/share/gl-validator.d/netbird.lua \
       /usr/share/oui/menu.d/netbird.json /www/views/gl-sdk4-ui-netbird.common.js.gz /www/views/gl-sdk4-ui-netbird.common.js \

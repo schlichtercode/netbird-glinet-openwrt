@@ -380,3 +380,18 @@ nb_network_set() {
     nb_invalidate_status
     nb_log "network '$1' -> $2"
 }
+
+# ── GL panel: live VPN indicator ─────────────────────────────────────────────
+# Push the (NetBird-augmented) vpn-client status into the panel websocket when
+# our state changed since the last push (connected / connecting / off).
+nb_panel_push() {
+    local state last
+    if [ -S "$NB_SOCK" ]; then state=$(nb_mgmt_state); else state=off; fi
+    [ -z "$state" ] && state=starting
+    last=$(cat "$NB_RUN/last-panel-state" 2>/dev/null)
+    [ "$state" = "$last" ] && [ "$1" != force ] && return 0
+    echo "$state" > "$NB_RUN/last-panel-state"
+    [ -S /var/run/ngx-ws-proxy.sock ] && [ -f /usr/libexec/netbird/wspush.lua ] && \
+        nb_timeout 10 lua /usr/libexec/netbird/wspush.lua >/dev/null 2>&1
+    return 0
+}

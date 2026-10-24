@@ -280,6 +280,38 @@ if [ -f "$f" ] && ! grep -q "netbird/switch.sh" "$f"; then
 fi'
 ok "hardware switch: NetBird follows the \"VPN client\" switch function"
 
+# ── 5c. GL panel VPN indicator + dashboard card ───────────────────────────────
+# Wrap GL's vpn-client RPC object (original kept as vpn-client.gl) and label the
+# "netbird" tunnel type in the dashboard bundle (backup kept). Idempotent;
+# a GL firmware update brings the originals back — just re-run install.sh.
+VPNC_CHANGED=$(rssh 'sh -s' <<'REMOTE'
+changed=0
+f=/usr/lib/oui-httpd/rpc/vpn-client
+if [ -f "$f" ] && ! grep -q "NETBIRD-VPN-CLIENT-WRAPPER" "$f"; then
+    cp "$f" "$f.gl"; changed=1
+fi
+if [ -f "$f.gl" ] && ! cmp -s /usr/libexec/netbird/vpn-client-wrapper.lua "$f"; then
+    cp /usr/libexec/netbird/vpn-client-wrapper.lua "$f"; chmod 644 "$f"; changed=1
+fi
+v=/www/views/gl-sdk4-ui-vpndashboard.common.js.gz
+if [ -f "$v" ] && ! zcat "$v" | grep -q '"netbird"===o?"NetBird"'; then
+    [ -f "$v.pre-netbird" ] || cp "$v" "$v.pre-netbird"
+    zcat "$v.pre-netbird" | sed \
+        -e 's/d={wireguard:"WireGuard",openvpn:"OpenVPN"}/d={wireguard:"WireGuard",openvpn:"OpenVPN",netbird:"NetBird"}/' \
+        -e 's/b\.label=S?M?""+M\.replace(\/,\/g," \/ "):C:`${T} \/ ${C}`/b.label=S?M?""+M.replace(\/,\/g," \/ "):C:"netbird"===o?"NetBird":`${T} \/ ${C}`/' \
+        | gzip -9 > "$v.tmp" && mv "$v.tmp" "$v"
+    if zcat "$v" | grep -q 'netbird:"NetBird"'; then
+        echo "   labelled NetBird in the VPN dashboard bundle (backup: $v.pre-netbird)" >&2
+    else
+        mv "$v.pre-netbird" "$v"; echo "   dashboard bundle layout unknown — left untouched" >&2
+    fi
+fi
+echo $changed
+REMOTE
+)
+[ "$VPNC_CHANGED" = 1 ] && RPC_MD5_BEFORE=changed
+ok "GL panel: VPN indicator + dashboard card show NetBird"
+
 # ── 6. Enable + start, reload nginx (panel picks up the RPC object + menu) ────
 say "Enabling and starting the service…"
 rssh '/etc/init.d/netbird enable; /etc/init.d/netbird restart' >/dev/null 2>&1 || warn "service restart returned an error — check: ssh $ROUTER logread -e netbird"

@@ -94,6 +94,7 @@ else
     nb_log "action $ACTION failed (rc=$rc): $(echo "$out" | tail -1)"
     write_result done false "${out:-failed (rc=$rc)}"
 fi
-# Refresh DNS forwarding right away after a (re)connect.
+# Refresh DNS forwarding right away after a (re)connect; update the panel's VPN indicator.
 case "$ACTION" in enroll|connect|restart) sleep 3; nb_dns_sync ;; esac
+nb_panel_push force
 exit "$rc"

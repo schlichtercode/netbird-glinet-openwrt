@@ -34,3 +34,5 @@ else
     uci set netbird.settings.enabled=0; uci commit netbird
     /etc/init.d/netbird stop >/dev/null 2>&1
 fi
+
+sleep 2; nb_panel_push force

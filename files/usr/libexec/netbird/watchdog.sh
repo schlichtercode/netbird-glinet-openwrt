@@ -88,6 +88,7 @@ case "${1:-once}" in
         next_pass=$(( $(date +%s) + 15 ))
         while :; do
             nb_mem_guard && { sleep 30; continue; }
+            nb_panel_push
             if [ "$(date +%s)" -ge "$next_pass" ]; then
                 if mkdir "$LOCK" 2>/dev/null; then
                     pass

@@ -139,3 +139,16 @@ Release mit Go 1.25, Juli 2026); andere Architekturen bekommen 0.81.4. Sobald Go
   `/etc/init.d/nginx restart` statt reload. Panel-Seite danach neu laden.
 - Hardware-Schalter: Hook in `/etc/gl-switch.d/vpn.sh` → `/usr/libexec/netbird/switch.sh on|off`; getestet (OFF räumt
   wt0/Resolver/dnsmasq auf, ON startet via procd). Menüpunkt jetzt unter VPN.
+
+## GL-Panel: VPN-Anzeige + Dashboard-Karte für NetBird (2026-10-24 ~23:20)
+- Internet-Seite: `vpnStatus()` = "is-active", wenn ein Eintrag in `systemStatus.service` (ovpnserver/wgserver) oder in
+  `vpnclientStatus` (= `status_list` aus WebSocket-Subscription `vpnclient.status`) `status === 1` hat (2 = connecting).
+- `vpnclient.status` kommt aus `/usr/share/gl-ngx/websocket/vpnclient.lua` = `dofile("/usr/lib/oui-httpd/rpc/vpn-client").get_status()`;
+  Live-Pushes schickt `gl-ngx-session` (eco) über `/var/run/ngx-ws-proxy.sock` (Format: `<len>\n<json>`, json = {name,data}).
+- VPN-Dashboard: Karten aus `vpn-client.get_tunnel().tunnels` (Felder: tunnel_id, name, enabled, via.via, from, to, options, killswitch),
+  Status aus `get_status().status_list` (per tunnel_id), Typ-Label aus `d={wireguard,openvpn}` im Bundle; ON/OFF → `set_tunnel`.
+- Umsetzung: Lua-Hülle ersetzt `/usr/lib/oui-httpd/rpc/vpn-client` (Original → `vpn-client.gl`), ergänzt NetBird (tunnel_id 900,
+  via "netbird") in `get_status`/`get_tunnel`, fängt `set_tunnel`/`remove_tunnel`/… für id 900 ab (→ action.sh start/stop).
+  `wspush.lua` (luasocket unix) pusht `vpnclient.status`; Watchdog/Actions/Switch rufen `nb_panel_push`.
+  Bundle-Patch: `netbird:"NetBird"` im Typ-Label-Map (Backup `.pre-netbird`). Installer idempotent, Uninstall stellt beides zurück.
+- Firmware-Update von GL überschreibt Hülle und Bundle → `install.sh` erneut ausführen.
