@@ -75,7 +75,9 @@ local function nb_status_entry()
     local status, enabled, d = nb_status()
     local rx, tx = wt0_counters()
     return { tunnel_id = NB_TUNNEL_ID, name = "NetBird", enabled = enabled, status = status, type = "netbird",
-             rx_bytes = rx, tx_bytes = tx, domain = d.domain, port = tonumber(d.port) or d.port, ipv4 = d.ip,
+             -- the dashboard calls domain.join(): must be an array
+             rx_bytes = rx, tx_bytes = tx, domain = (d.domain ~= "" and { d.domain } or {}),
+             port = tonumber(d.port) or d.port, ipv4 = d.ip,
              via = { type = "netbird", group_id = "netbird", peer_id = "netbird" } }
 end
 

@@ -152,3 +152,5 @@ Release mit Go 1.25, Juli 2026); andere Architekturen bekommen 0.81.4. Sobald Go
   `wspush.lua` (luasocket unix) pusht `vpnclient.status`; Watchdog/Actions/Switch rufen `nb_panel_push`.
   Bundle-Patch: `netbird:"NetBird"` im Typ-Label-Map (Backup `.pre-netbird`). Installer idempotent, Uninstall stellt beides zurück.
 - Firmware-Update von GL überschreibt Hülle und Bundle → `install.sh` erneut ausführen.
+- Dashboard-Detailzeilen: `status.domain` muss ein **Array** sein (`domain.join(", ")`), sonst Render-Fehler und der ganze
+  Detailblock verschwindet. Aufgeklappt-Zustand merkt sich GL pro tunnel_id (`tunnelUnfoldList` im History-Store).
