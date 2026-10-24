@@ -1,0 +1,450 @@
+-- NetBird RPC object for the GL.iNet admin panel (oui).
+-- Loaded by /usr/lib/lua/oui/rpc.lua via dofile; every function in the
+-- returned table becomes a method callable as
+--   $rpcRequest("call", ["sid", "netbird", "<method>", params])
+-- Authentication / ACL are handled by GL before we are called.
+
+local uci = require "uci"
+local cjson = require "cjson"
+
+local M = {}
+
+local BIN = "/usr/bin/netbird"
+local RUN = "/var/run/netbird"
+local LOG = "/var/log/netbird/client.log"
+local COMMON = "/usr/libexec/netbird/common.sh"
+local ACTION = "/usr/libexec/netbird/action.sh"
+
+-- ── small helpers ────────────────────────────────────────────────────────────
+local function sh(cmd)
+    local f = io.popen(cmd .. " 2>/dev/null")
+    if not f then return "" end
+    local out = f:read("*a") or ""
+    f:close()
+    return out
+end
+
+local function q(s)
+    return "'" .. tostring(s):gsub("'", "'\\''") .. "'"
+end
+
+local function readfile(path)
+    local f = io.open(path, "r")
+    if not f then return nil end
+    local d = f:read("*a")
+    f:close()
+    return d
+end
+
+local function exists(path)
+    local f = io.open(path, "r")
+    if f then f:close(); return true end
+    return false
+end
+
+-- io.open cannot open a unix socket; use the shell test instead.
+local function sock_exists()
+    return os.execute("[ -S /var/run/netbird.sock ]") == 0
+end
+
+local function background(cmd)
+    os.execute("( " .. cmd .. " >/dev/null 2>&1 </dev/null & )")
+end
+
+-- Duration JSON ("0.0123s") / CLI nanoseconds -> milliseconds
+local function latency_ms(v)
+    if type(v) == "number" then return math.floor(v / 1e6 + 0.5) end
+    if type(v) == "string" then
+        local sec = tonumber(v:match("^([%d%.]+)s$"))
+        if sec then return math.floor(sec * 1000 + 0.5) end
+    end
+    return 0
+end
+
+-- The daemon's HTTP/JSON gateway returns the proto StatusResponse
+-- ({status, fullStatus{...}, daemonVersion}); `netbird status --json`
+-- returns the CLI overview. Map the gateway shape onto the CLI shape so the
+-- rest of get_status has one format to deal with.
+local function normalize(st)
+    if type(st.fullStatus) ~= "table" then return st end
+    local fs = st.fullStatus
+    local lp = type(fs.localPeerState) == "table" and fs.localPeerState or {}
+    local ms = type(fs.managementState) == "table" and fs.managementState or {}
+    local ss = type(fs.signalState) == "table" and fs.signalState or {}
+    local details, connected = {}, 0
+    if type(fs.peers) == "table" then
+        for _, p in ipairs(fs.peers) do
+            if type(p) == "table" then
+                local cs = type(p.connStatus) == "string" and p.connStatus or ""
+                if cs == "Connected" then connected = connected + 1 end
+                details[#details + 1] = {
+                    fqdn = p.fqdn, netbirdIp = p.IP, status = cs,
+                    connectionType = (p.relayed == true) and "Relayed" or "P2P",
+                    relayed = p.relayed == true, latency = p.latency,
+                    lastStatusUpdate = p.connStatusUpdate,
+                }
+            end
+        end
+    end
+    return {
+        daemonStatus = st.status, daemonVersion = st.daemonVersion,
+        netbirdIp = lp.IP, fqdn = lp.fqdn, usesKernelInterface = lp.kernelInterface == true,
+        management = { url = ms.URL, connected = ms.connected == true, error = ms.error },
+        signal = { url = ss.URL, connected = ss.connected == true, error = ss.error },
+        peers = { total = #details, connected = connected, details = details },
+        networks = lp.networks, dnsServers = fs.dnsServers,
+    }
+end
+
+-- cjson decodes JSON null as a userdata sentinel; treat it like "absent".
+local function tbl(x)
+    if type(x) == "table" then return x end
+    return {}
+end
+
+local function err(msg, code)
+    return { err_code = code or -1, err_msg = msg }
+end
+
+local function trim(s)
+    return (tostring(s or ""):gsub("^%s+", ""):gsub("%s+$", ""))
+end
+
+local function meminfo()
+    local total, avail = 0, 0
+    local d = readfile("/proc/meminfo") or ""
+    total = tonumber(d:match("MemTotal:%s+(%d+)")) or 0
+    avail = tonumber(d:match("MemAvailable:%s+(%d+)")) or 0
+    local swap_total = tonumber(d:match("SwapTotal:%s+(%d+)")) or 0
+    local swap_free = tonumber(d:match("SwapFree:%s+(%d+)")) or 0
+    return total, avail, swap_total, swap_free
+end
+
+-- procd knows the daemon pid; avoids forking `ps` on every poll.
+local function procd_info()
+    local out = sh("ubus call service list '{\"name\":\"netbird\"}'")
+    local ok, t = pcall(cjson.decode, out)
+    if not ok or type(t) ~= "table" or type(t.netbird) ~= "table" then return nil, false, false end
+    local inst = type(t.netbird.instances) == "table" and t.netbird.instances or {}
+    local d = type(inst.daemon) == "table" and inst.daemon or {}
+    local w = type(inst.watchdog) == "table" and inst.watchdog or {}
+    return tonumber(d.pid), d.running == true, w.running == true
+end
+
+local function rss_kb(pid)
+    if not pid then return 0 end
+    local d = readfile("/proc/" .. pid .. "/status") or ""
+    return tonumber(d:match("VmRSS:%s+(%d+)")) or 0
+end
+
+local function wg_mode()
+    if not exists("/sys/class/net/wt0/ifindex") then return "-" end
+    if exists("/sys/class/net/wt0/tun_flags") then return "userspace" end
+    return "kernel"
+end
+
+local function status_json(maxage)
+    if not sock_exists() then return nil end
+    local out = sh(". " .. COMMON .. "; nb_load_config; nb_status_json " .. tonumber(maxage or 5))
+    if out == "" then return nil end
+    local ok, t = pcall(cjson.decode, out)
+    if ok and type(t) == "table" then return t end
+    return nil
+end
+
+local function cli_version()
+    local cached = readfile(RUN .. "/cli-version")
+    if cached and cached ~= "" then return trim(cached) end
+    if not exists(BIN) then return "" end
+    local v = trim(sh("timeout 10 " .. BIN .. " version"))
+    if v ~= "" then
+        os.execute("mkdir -p " .. RUN)
+        local f = io.open(RUN .. "/cli-version", "w")
+        if f then f:write(v); f:close() end
+    end
+    return v
+end
+
+-- ── config schema (UCI /etc/config/netbird) ──────────────────────────────────
+local SCHEMA = {
+    settings = {
+        enabled = "bool", log_level = "loglevel", gogc = "int", gomemlimit = "memsize",
+        wg_userspace = "bool", disable_ebpf_proxy = "bool", skip_nftables_check = "bool",
+        watchdog_interval = "int", mem_min_kb = "int", mem_cooldown = "int", hw_switch = "bool",
+        hw_switch_mode = "switchmode",
+    },
+    connection = {
+        management_url = "url", hostname = "host", disable_client_routes = "bool",
+        disable_server_routes = "bool", disable_dns = "bool", lan_dns_forward = "bool",
+        block_lan_access = "bool", firewall_zone = "bool", wireguard_port = "port", api_token = "token",
+        extra_up_args = "args", exit_node = "netid",
+    },
+}
+
+local function validate(kind, v)
+    v = tostring(v)
+    if kind == "bool" then
+        if v == "true" or v == "1" then return "1" end
+        if v == "false" or v == "0" or v == "" then return "0" end
+        return nil
+    elseif kind == "int" then
+        return v:match("^%d+$") and v or nil
+    elseif kind == "port" then
+        local n = tonumber(v)
+        return (n and n >= 1 and n <= 65535 and v:match("^%d+$")) and v or nil
+    elseif kind == "loglevel" then
+        return ({ panic=1, fatal=1, error=1, warn=1, info=1, debug=1, trace=1 })[v] and v or nil
+    elseif kind == "memsize" then
+        if v == "" then return "" end
+        return v:match("^%d+[KMG]i?B?$") and v or nil
+    elseif kind == "url" then
+        if not v:match("^https?://[%w%.%-]+:%d+/?$") then return nil end
+        return (v:gsub("/$", ""))
+    elseif kind == "host" then
+        if v == "" then return "" end
+        return v:match("^[%w%-]+$") and #v <= 63 and v or nil
+    elseif kind == "token" then
+        if v == "" then return "" end
+        return v:match("^[%w%-%._]+$") and #v <= 200 and v or nil
+    elseif kind == "switchmode" then
+        return (v == "service" or v == "exitnode") and v or nil
+    elseif kind == "netid" then
+        if v == "" then return "" end
+        return (not v:find("[%c\"\\]")) and #v <= 100 and v or nil
+    elseif kind == "args" then
+        if v == "" then return "" end
+        return v:match("^[%w%-%._:=/ ]+$") and #v <= 300 and v or nil
+    end
+    return nil
+end
+
+local function read_config()
+    local c = uci.cursor()
+    local cfg = {}
+    for sec, fields in pairs(SCHEMA) do
+        cfg[sec] = {}
+        for k, kind in pairs(fields) do
+            local v = c:get("netbird", sec, k)
+            if kind == "bool" then
+                cfg[sec][k] = (v == "1")
+            elseif k == "api_token" then
+                cfg[sec][k] = (v ~= nil and v ~= "")   -- never leak the token
+            else
+                cfg[sec][k] = v or ""
+            end
+        end
+    end
+    cfg.connection.peer_id = c:get("netbird", "connection", "peer_id") or ""
+    cfg.connection.route_id = c:get("netbird", "connection", "route_id") or ""
+    return cfg
+end
+
+-- ── methods ──────────────────────────────────────────────────────────────────
+
+-- Overall state for the panel. Cheap enough to poll every ~10 s: the status
+-- JSON is cached for 5 s by nb_status_json, everything else is /proc + ubus.
+M.get_status = function(params)
+    local total, avail, swap_total, swap_free = meminfo()
+    local pid, procd_daemon, procd_watchdog = procd_info()
+    local st = status_json(5)
+    if st then st = normalize(st) end
+
+    local res = {
+        installed = exists(BIN),
+        cli_version = cli_version(),
+        running = sock_exists(),
+        pid = pid,
+        procd_daemon = procd_daemon,
+        procd_watchdog = procd_watchdog,
+        wg_mode = wg_mode(),
+        mem = { total_kb = total, avail_kb = avail, rss_kb = rss_kb(pid),
+                swap_total_kb = swap_total, swap_free_kb = swap_free },
+        config = read_config(),
+        dns_forward = {},
+    }
+
+    local dm = readfile("/tmp/dnsmasq.d/netbird.conf")
+    if dm then
+        for d in dm:gmatch("server=/([^/]+)/") do res.dns_forward[#res.dns_forward + 1] = d end
+    end
+
+    local act = readfile(RUN .. "/action.json")
+    if act then
+        local ok, a = pcall(cjson.decode, act)
+        if ok then res.action = a end
+    end
+
+    if st then
+        local mgmt = tbl(st.management or st.managementState)
+        local sig = tbl(st.signal or st.signalState)
+        local peers = tbl(st.peers)
+        local dstate = type(st.daemonStatus) == "string" and st.daemonStatus or ""
+        local s = {
+            daemon_status = dstate,
+            daemon_version = st.daemonVersion or "",
+            netbird_ip = type(st.netbirdIp) == "string" and st.netbirdIp or "",
+            fqdn = type(st.fqdn) == "string" and st.fqdn or "",
+            mgmt_url = type(mgmt.url) == "string" and mgmt.url or "",
+            mgmt_connected = mgmt.connected == true,
+            mgmt_error = type(mgmt.error) == "string" and mgmt.error or "",
+            signal_connected = sig.connected == true,
+            kernel_interface = st.usesKernelInterface == true,
+            peers_total = tonumber(peers.total) or 0,
+            peers_connected = tonumber(peers.connected) or 0,
+            networks = tbl(st.networks),
+            dns_servers = {},
+            peers = {},
+        }
+        for _, g in ipairs(tbl(st.dnsServers)) do
+            if type(g) == "table" then
+                s.dns_servers[#s.dns_servers + 1] = {
+                    servers = tbl(g.servers), domains = tbl(g.domains),
+                    enabled = g.enabled ~= false, error = type(g.error) == "string" and g.error or "",
+                }
+            end
+        end
+        do
+            for _, p in ipairs(tbl(peers.details)) do
+                s.peers[#s.peers + 1] = {
+                    fqdn = p.fqdn or "", ip = p.netbirdIp or "",
+                    status = p.status or "", conn = p.connectionType or "",
+                    relayed = p.relayed == true,
+                    latency_ms = latency_ms(p.latency),
+                    last_update = p.lastStatusUpdate or "",
+                }
+            end
+            table.sort(s.peers, function(a, b) return a.fqdn < b.fqdn end)
+        end
+        -- exit node advertised by this router?
+        s.exit_node_active = false
+        for _, n in ipairs(s.networks) do
+            if tostring(n):find("0.0.0.0/0", 1, true) then s.exit_node_active = true end
+        end
+        res.status = s
+        res.needs_login = (dstate == "NeedsLogin")
+        res.login_failed = (dstate == "LoginFailed")
+    else
+        -- daemon socket up but the JSON gateway did not answer: it is still
+        -- starting. Never fork the CLI from the web path on a 128 MB router.
+        res.starting = res.running
+        res.needs_login = false
+    end
+    return res
+end
+
+M.get_config = function(params)
+    return read_config()
+end
+
+-- params: { settings = {...}, connection = {...} } (only known keys)
+M.set_config = function(params)
+    if type(params) ~= "table" then return err("invalid params") end
+    local c = uci.cursor()
+    local changed = {}
+    for sec, fields in pairs(SCHEMA) do
+        local in_sec = params[sec]
+        if type(in_sec) == "table" then
+            for k, kind in pairs(fields) do
+                if in_sec[k] ~= nil then
+                    if k == "api_token" and (in_sec[k] == "" or in_sec[k] == "KEEP") then
+                        -- empty = keep current token
+                    else
+                        local v = validate(kind, in_sec[k])
+                        if v == nil then return err("invalid value for " .. sec .. "." .. k) end
+                        if not c:get("netbird", sec) then c:set("netbird", sec, sec) end
+                        c:set("netbird", sec, k, v)
+                        changed[#changed + 1] = sec .. "." .. k
+                    end
+                end
+            end
+        end
+    end
+    if #changed > 0 then
+        c:commit("netbird")
+        os.execute("rm -f " .. RUN .. "/status.json")
+    end
+    return { ok = true, changed = changed, restart_required = #changed > 0 }
+end
+
+-- params: { name = "enroll|connect|disconnect|restart|start|stop|exit_toggle|exit_discover", arg = "..." }
+M.action = function(params)
+    if type(params) ~= "table" or type(params.name) ~= "string" then return err("invalid params") end
+    local name = params.name
+    local allowed = { enroll=1, connect=1, disconnect=1, restart=1, start=1, stop=1, exit_toggle=1, exit_discover=1 }
+    if not allowed[name] then return err("unknown action") end
+    local arg = ""
+    if name == "enroll" then
+        arg = trim(params.arg)
+        if not arg:match("^[%w%-%._]+$") or #arg > 200 then return err("invalid setup key") end
+    end
+    -- busy?
+    local pidf = readfile(RUN .. "/action.lock/pid")
+    if pidf then
+        local pid = tonumber(trim(pidf))
+        if pid and os.execute("kill -0 " .. pid .. " 2>/dev/null") == 0 then
+            return err("busy", -2)
+        end
+    end
+    background("sh " .. ACTION .. " " .. q(name) .. " " .. q(arg))
+    return { ok = true, action = name }
+end
+
+-- Networks (routes / exit nodes) the management server offers this peer,
+-- with their selection state. Read through the daemon gateway (no CLI).
+M.get_networks = function(params)
+    if not sock_exists() then return { networks = {} } end
+    local out = sh(". " .. COMMON .. "; nb_load_config; nb_networks_json")
+    local ok, t = pcall(cjson.decode, out)
+    local list = {}
+    if ok and type(t) == "table" and type(t.routes) == "table" then
+        for _, n in ipairs(t.routes) do
+            if type(n) == "table" and type(n.ID) == "string" then
+                local range = type(n.range) == "string" and n.range or ""
+                list[#list + 1] = {
+                    id = n.ID, range = range, selected = n.selected == true,
+                    domains = tbl(n.domains),
+                    exit_node = (range == "0.0.0.0/0" or range == "::/0"),
+                }
+            end
+        end
+        table.sort(list, function(a, b) return a.id < b.id end)
+    end
+    return { networks = list }
+end
+
+-- params: { id = "<network id>", selected = true|false }
+M.select_network = function(params)
+    if type(params) ~= "table" or type(params.id) ~= "string" or params.id == "" then return err("invalid params") end
+    if params.id:find("[%c\"\\]") or #params.id > 100 then return err("invalid network id") end
+    if not sock_exists() then return err("daemon not running") end
+    local state = (params.selected == true or params.selected == "true" or params.selected == 1) and "on" or "off"
+    os.execute(". " .. COMMON .. "; nb_load_config; nb_network_set " .. q(params.id) .. " " .. state .. " >/dev/null 2>&1")
+    return { ok = true, id = params.id, selected = (state == "on") }
+end
+
+M.get_log = function(params)
+    local n = 60
+    if type(params) == "table" and tonumber(params.lines) then
+        n = math.max(10, math.min(500, math.floor(tonumber(params.lines))))
+    end
+    local out = sh("tail -n " .. n .. " " .. LOG .. " | tr -cd '\\11\\12\\40-\\176'")
+    return { log = out }
+end
+
+M.run_watchdog = function(params)
+    background("sh /usr/libexec/netbird/watchdog.sh once")
+    return { ok = true }
+end
+
+-- Exit-node route state via the management API (blocking ≤ 20 s, on demand only).
+M.get_exit_state = function(params)
+    local c = uci.cursor()
+    local token = c:get("netbird", "connection", "api_token") or ""
+    local route = c:get("netbird", "connection", "route_id") or ""
+    if token == "" then return { configured = false, reason = "no_token" } end
+    if route == "" then return { configured = false, reason = "no_route" } end
+    local s = trim(sh("sh /usr/libexec/netbird/exitnode.sh state"))
+    return { configured = true, enabled = (s == "true"), raw = s }
+end
+
+return M

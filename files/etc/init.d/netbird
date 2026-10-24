@@ -1,0 +1,70 @@
+#!/bin/sh /etc/rc.common
+# NetBird on GL.iNet firmware — procd owns the daemon.
+#   instance "daemon":   netbird service run (auto-respawn, unlimited retries)
+#   instance "watchdog": /usr/libexec/netbird/watchdog.sh loop
+# Config: /etc/config/netbird (UCI). State: /etc/netbird (overlay).
+
+START=90
+STOP=10
+USE_PROCD=1
+
+. /usr/libexec/netbird/common.sh
+
+start_service() {
+    nb_load_config
+    [ "$NB_ENABLED" = 1 ] || { nb_log "disabled in /etc/config/netbird"; return 0; }
+    # opkg install without internet / interrupted download: no binary yet
+    [ -x "$NB_BIN" ] || { nb_log "$NB_BIN missing — run netbird-fetch-binary"; return 0; }
+    nb_prepare_dirs
+    nb_invalidate_status
+
+    # A stale daemon from a crash would keep wt0 + the NETBIRD-* chains.
+    [ "$(nb_daemon_count)" -gt 0 ] && nb_kill_daemon 5
+    rm -f "$NB_SOCK"
+
+    procd_open_instance daemon
+    # run-daemon.sh: memory-guard cooldown + oom_score_adj, then exec netbird
+    procd_set_param command /usr/libexec/netbird/run-daemon.sh
+    # HTTP/JSON gateway on loopback TCP: lets the panel and the watchdog read
+    # the status with curl instead of forking the 46 MB CLI binary.
+    if [ "$NB_JSON_SOCKET" = 1 ]; then
+        procd_append_param command --enable-json-socket --json-socket "tcp://$NB_HTTP_ADDR"
+    fi
+    # shellcheck disable=SC2046
+    procd_set_param env $(nb_daemon_env)
+    # threshold 3600s, 10s between restarts, 0 = retry forever (OOM kills!)
+    procd_set_param respawn 3600 10 0
+    # give the daemon time to tear down wt0 / firewall rules / resolv.conf
+    # on SIGTERM before procd escalates to SIGKILL (default is 5 s)
+    procd_set_param term_timeout 20
+    procd_set_param stdout 0
+    procd_set_param stderr 0
+    procd_close_instance
+
+    procd_open_instance watchdog
+    procd_set_param command /usr/libexec/netbird/watchdog.sh loop
+    procd_set_param respawn 3600 10 0
+    procd_set_param stdout 0
+    procd_set_param stderr 0
+    procd_close_instance
+}
+
+stop_service() {
+    nb_load_config
+    # No `netbird down` here: that forks the 46 MB CLI next to the daemon.
+    # SIGTERM makes the daemon shut down cleanly on its own (interface,
+    # firewall rules and resolv.conf are restored by the daemon).
+    # Stop through procd and wait until it has freed the instances: a process
+    # we kill ourselves leaves procd an instance that it re-uses on the next
+    # start — and procd 2018 re-uses it without its respawn flag once that
+    # was lost (notes/20-recherche.md, Vorfall 4).
+    nb_procd_stop_instances 30
+    rm -f "$NB_SOCK"
+    nb_invalidate_status
+    nb_dns_sync clear
+    nb_resolv_restore
+}
+
+service_triggers() {
+    procd_add_reload_trigger "netbird"
+}

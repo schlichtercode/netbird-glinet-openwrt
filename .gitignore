@@ -17,3 +17,6 @@ build/
 
 # Claude Code session files
 .claude/
+
+# installer download cache (NetBird release binaries)
+.cache/

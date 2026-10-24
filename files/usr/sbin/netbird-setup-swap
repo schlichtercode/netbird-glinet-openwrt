@@ -1,0 +1,82 @@
+#!/bin/sh
+# Create a swap file on a USB stick for memory-starved routers (e.g. GL-SFT1200
+# with 128 MB RAM). Swap on the router's own NAND flash is impossible (UBIFS
+# has no swap-file support) and would wear it out — hence USB only.
+#
+#   netbird-setup-swap [--size MB] [--path /mnt/sda1/netbird.swap] [--remove]
+#
+# Persists via UCI fstab (`config swap`), activated by block-mount at boot.
+
+SIZE_MB=256
+SWAPFILE=""
+REMOVE=0
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --size) SIZE_MB="$2"; shift ;;
+        --path) SWAPFILE="$2"; shift ;;
+        --remove) REMOVE=1 ;;
+        -h|--help) sed -n '2,10p' "$0"; exit 0 ;;
+        *) echo "unknown option $1" >&2; exit 2 ;;
+    esac
+    shift
+done
+
+for b in mkswap swapon swapoff dd; do
+    command -v "$b" >/dev/null 2>&1 || { echo "missing: $b" >&2; exit 1; }
+done
+
+if [ "$REMOVE" = 1 ]; then
+    for f in $(uci -q show fstab | sed -n "s/^fstab\.\(@swap\[[0-9]*\]\)\.device='\(.*netbird\.swap\)'$/\1 \2/p" | awk '{print $2}'); do
+        swapoff "$f" 2>/dev/null; rm -f "$f"; echo "removed $f"
+    done
+    i=0
+    while uci -q get "fstab.@swap[$i]" >/dev/null 2>&1; do
+        case "$(uci -q get "fstab.@swap[$i].device")" in
+            *netbird.swap) uci delete "fstab.@swap[$i]"; continue ;;
+        esac
+        i=$((i + 1))
+    done
+    uci commit fstab
+    echo "swap removed"; exit 0
+fi
+
+if [ -z "$SWAPFILE" ]; then
+    # first writable USB mount under /mnt (block-mount auto_mount) or /tmp/mountd
+    for m in /mnt/* /tmp/mountd/*; do
+        [ -d "$m" ] || continue
+        mountpoint -q "$m" 2>/dev/null || grep -q " $m " /proc/mounts || continue
+        touch "$m/.nb-write-test" 2>/dev/null && rm -f "$m/.nb-write-test" && { SWAPFILE="$m/netbird.swap"; break; }
+    done
+    [ -n "$SWAPFILE" ] || { echo "no writable USB mount found under /mnt — plug in a stick (FAT32/ext4) and retry, or pass --path" >&2; exit 1; }
+fi
+
+case "$SWAPFILE" in
+    /overlay/*|/root/*|/etc/*) echo "refusing to put swap on the router's flash ($SWAPFILE)" >&2; exit 1 ;;
+esac
+fstype=$(awk -v p="$(dirname "$SWAPFILE")" '$2==p{print $3}' /proc/mounts)
+case "$fstype" in
+    ubifs|squashfs|overlay|tmpfs) echo "refusing: $(dirname "$SWAPFILE") is $fstype" >&2; exit 1 ;;
+esac
+
+if [ ! -f "$SWAPFILE" ]; then
+    echo "creating ${SIZE_MB} MB swap file at $SWAPFILE (this takes a moment)..."
+    dd if=/dev/zero of="$SWAPFILE" bs=1M count="$SIZE_MB" 2>/dev/null || { echo "dd failed" >&2; rm -f "$SWAPFILE"; exit 1; }
+    chmod 600 "$SWAPFILE"
+    mkswap "$SWAPFILE" >/dev/null || { echo "mkswap failed" >&2; exit 1; }
+fi
+swapon "$SWAPFILE" 2>/dev/null || echo "(swapon: already active or failed — check dmesg)"
+
+# persist
+found=0; i=0
+while uci -q get "fstab.@swap[$i]" >/dev/null 2>&1; do
+    [ "$(uci -q get "fstab.@swap[$i].device")" = "$SWAPFILE" ] && found=1
+    i=$((i + 1))
+done
+if [ "$found" = 0 ]; then
+    uci add fstab swap >/dev/null
+    uci set fstab.@swap[-1].device="$SWAPFILE"
+    uci set fstab.@swap[-1].enabled='1'
+    uci commit fstab
+fi
+/etc/init.d/fstab enable 2>/dev/null
+echo "swap active:"; grep -E 'SwapTotal|SwapFree' /proc/meminfo

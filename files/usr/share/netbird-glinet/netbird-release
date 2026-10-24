@@ -1,0 +1,9 @@
+# NetBird release installed by netbird-fetch-binary (router) and install.sh
+# (workstation). Shell syntax, no spaces around "=".
+#
+# NetBird releases built with Go 1.26 (0.78.0+) carry a ~35 MB .noptrbss
+# segment; a 128 MB router needs vm.overcommit_memory=1 to exec them
+# (/etc/sysctl.d/90-netbird.conf). NETBIRD_VERSION_MIPS32 is the escape hatch:
+# set it to 0.77.1 (last Go-1.25 release) to keep overcommit at its default.
+NETBIRD_VERSION_DEFAULT=0.81.4
+NETBIRD_VERSION_MIPS32=0.81.4

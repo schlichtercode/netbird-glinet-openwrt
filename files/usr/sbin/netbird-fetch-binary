@@ -1,0 +1,145 @@
+#!/bin/sh
+# netbird-fetch-binary — download the matching NetBird release and install it
+# as /usr/bin/netbird. Runs ON the router (BusyBox ash).
+#
+#   netbird-fetch-binary [--version X.Y.Z] [--arch NAME] [--force] [--check] [--no-restart]
+#
+#   --version   release to install (default: see /usr/share/netbird-glinet/netbird-release)
+#   --arch      override the release arch, e.g. mipsle_softfloat, arm64
+#   --force     download even if the installed binary already has that version
+#   --check     only print arch / wanted / installed version, change nothing
+#   --no-restart  do not start the service again afterwards (used by setup-router.sh)
+#
+# Why the binary is not inside the .ipk: it is ~46 MB and opkg unpacks
+# packages through /tmp, which is RAM on OpenWrt. This script streams the
+# release tarball with curl, hashes it while it streams (tee → sha256sum, no
+# second copy on disk), extracts the binary onto the overlay flash next to
+# its final place and renames it there. Needs ~50 MB free flash; if the old
+# binary is in the way it is removed first (the service is stopped anyway).
+set -u
+
+RELEASE_FILE=/usr/share/netbird-glinet/netbird-release
+BIN=/usr/bin/netbird
+WORK=/usr/bin/.netbird-fetch       # same filesystem as $BIN → atomic rename
+NEED_KB=51200                      # a MIPS32 build is ~46 MB
+SYSCTL_FILE=/etc/sysctl.d/90-netbird.conf
+
+VERSION="${NETBIRD_VERSION:-}"
+ARCH_OVERRIDE="${NETBIRD_ARCH:-}"
+FORCE=0; CHECK=0; RESTART=1
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --version) VERSION="$2"; shift ;;
+        --arch) ARCH_OVERRIDE="$2"; shift ;;
+        --force) FORCE=1 ;;
+        --check) CHECK=1 ;;
+        --no-restart) RESTART=0 ;;
+        -h|--help) sed -n '2,12p' "$0"; exit 0 ;;
+        *) echo "unknown option: $1" >&2; exit 2 ;;
+    esac
+    shift
+done
+
+die() { echo "netbird-fetch-binary: $*" >&2; exit 1; }
+say() { echo "   $*"; }
+
+# ── which release ─────────────────────────────────────────────────────────────
+NETBIRD_VERSION_DEFAULT=""; NETBIRD_VERSION_MIPS32=""
+[ -f "$RELEASE_FILE" ] && . "$RELEASE_FILE"
+
+MACHINE=$(uname -m)
+# ELF header byte 5 of a known binary: 01 = little-endian, 02 = big-endian.
+# hexdump exists on GL BusyBox, od does not.
+ELF=$(hexdump -n 8 -C /bin/busybox 2>/dev/null | head -1 | awk '{print $6}')
+[ -z "$ELF" ] && ELF=$(od -An -tx1 -j5 -N1 /bin/busybox 2>/dev/null | tr -d ' ')
+case "$MACHINE" in
+    mips)    [ "$ELF" = 01 ] && ARCH=mipsle_softfloat || ARCH=mips_softfloat ;;
+    mips64)  [ "$ELF" = 01 ] && ARCH=mips64le_softfloat || ARCH=mips64_softfloat ;;
+    aarch64) ARCH=arm64 ;;
+    armv7l|armv6l|armv8l) ARCH=armv6 ;;
+    x86_64)  ARCH=amd64 ;;
+    i?86)    ARCH=386 ;;
+    *)       ARCH="" ;;
+esac
+[ -n "$ARCH_OVERRIDE" ] && ARCH="$ARCH_OVERRIDE"
+if [ -z "$VERSION" ]; then
+    case "$ARCH" in
+        mips_*|mipsle_*) VERSION="${NETBIRD_VERSION_MIPS32:-$NETBIRD_VERSION_DEFAULT}" ;;
+        *) VERSION="$NETBIRD_VERSION_DEFAULT" ;;
+    esac
+fi
+CUR=$("$BIN" version 2>/dev/null || echo none)
+
+if [ "$CHECK" = 1 ]; then
+    echo "machine=$MACHINE elf_byte5=$ELF arch=${ARCH:-UNKNOWN} wanted=${VERSION:-?} installed=$CUR"
+    exit 0
+fi
+[ -n "$ARCH" ] || die "cannot map '$MACHINE' to a NetBird release — pass --arch"
+[ -n "$VERSION" ] || die "no NetBird version known — pass --version or fix $RELEASE_FILE"
+if [ "$FORCE" = 0 ] && [ "$CUR" = "$VERSION" ]; then
+    say "netbird $VERSION already installed (use --force to download again)"
+    exit 0
+fi
+command -v curl >/dev/null 2>&1 || die "curl missing (opkg install curl)"
+
+TARBALL="netbird_${VERSION}_linux_${ARCH}.tar.gz"
+SUMS="netbird_${VERSION}_checksums.txt"
+BASE="https://github.com/netbirdio/netbird/releases/download/v${VERSION}"
+
+# ── stop the daemon (never two NetBird processes on a 128 MB router) ─────────
+was_running=0
+ps w 2>/dev/null | grep -q '[n]etbird service run' && was_running=1
+[ -x /etc/init.d/netbird ] && /etc/init.d/netbird stop >/dev/null 2>&1
+killall -q netbird 2>/dev/null; sleep 1
+rm -f /var/run/netbird.sock
+
+# ── flash space ───────────────────────────────────────────────────────────────
+free_kb() { df -k "$(dirname "$BIN")" 2>/dev/null | awk 'NR==2{print $4}'; }
+FREE=$(free_kb); : "${FREE:=0}"
+if [ "$FREE" -lt $((NEED_KB + 3072)) ] && [ -f "$BIN" ]; then
+    say "not enough flash for a side-by-side upgrade — removing the old binary first"
+    rm -f "$BIN"; CUR=none
+    FREE=$(free_kb); : "${FREE:=0}"
+fi
+[ "$FREE" -ge $((NEED_KB + 2048)) ] || die "only $((FREE/1024)) MB free on flash, need $(( (NEED_KB + 2048) / 1024 )) MB"
+
+# ── download, verify, extract (streamed, nothing goes through /tmp) ──────────
+rm -rf "$WORK"; mkdir -p "$WORK" || die "cannot create $WORK"
+trap 'rm -rf "$WORK"' EXIT INT TERM
+
+say "fetching $SUMS…"
+WANT=$(curl -fsSL --retry 3 "$BASE/$SUMS" 2>/dev/null | grep " $TARBALL\$" | awk '{print $1}')
+[ -n "$WANT" ] || die "no checksum for $TARBALL in $BASE/$SUMS (version or arch wrong? no internet?)"
+
+say "downloading $TARBALL (about a minute on a MIPS router)…"
+if command -v sha256sum >/dev/null 2>&1; then
+    mkfifo "$WORK/fifo" || die "mkfifo failed"
+    sha256sum < "$WORK/fifo" > "$WORK/sum" &
+    curl -fL -sS --retry 3 "$BASE/$TARBALL" | tee "$WORK/fifo" | tar -xzf - -C "$WORK" netbird
+    wait
+    GOT=$(awk '{print $1}' "$WORK/sum" 2>/dev/null)
+    [ "$GOT" = "$WANT" ] || die "SHA256 mismatch for $TARBALL (got ${GOT:-nothing}, want $WANT) — download incomplete?"
+    say "checksum verified"
+else
+    curl -fL -sS --retry 3 "$BASE/$TARBALL" | tar -xzf - -C "$WORK" netbird
+    say "no sha256sum on this router — checksum NOT verified, size check only"
+fi
+[ -s "$WORK/netbird" ] || die "download or extract failed (no 'netbird' in the tarball?)"
+SIZE=$(wc -c < "$WORK/netbird")
+[ "$SIZE" -gt 10000000 ] || die "extracted binary is only $SIZE bytes — broken download"
+chmod 755 "$WORK/netbird"
+
+# overcommit must be on before a Go 1.26 binary is executed on 128 MB RAM
+[ -f "$SYSCTL_FILE" ] && sysctl -p "$SYSCTL_FILE" >/dev/null 2>&1
+GOT=$("$WORK/netbird" version 2>&1 || true)
+case "$GOT" in
+    "$VERSION"*) ;;
+    *) die "binary does not run here ('$GOT'). Wrong arch (--arch mips_softfloat / mipsle_hardfloat)? A bare 'Segmentation fault' on a small router means vm.overcommit_memory=1 did not take effect, or try --version 0.77.1" ;;
+esac
+mv -f "$WORK/netbird" "$BIN" || die "cannot move the binary into place"
+say "installed netbird $GOT → $BIN ($((SIZE/1024/1024)) MB)"
+
+if [ "$RESTART" = 1 ] && [ "$was_running" = 1 ] && [ -x /etc/init.d/netbird ]; then
+    /etc/init.d/netbird start >/dev/null 2>&1 && say "service started again"
+fi
+exit 0
