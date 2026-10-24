@@ -69,8 +69,14 @@
       Dashboard-Bundle wieder GL-Original, Firewall-Zone weg, kein wt0, keine NETBIRD-Chains, resolv.conf normal, nginx mit
       3 Prozessen, `/etc/netbird` + `/etc/config/netbird` erhalten. Einziger Rest: die leeren Verzeichnisse
       `/usr/libexec/netbird` und `/usr/share/netbird-glinet` (opkg löscht nur Dateien) ⇒ `postrm` räumt sie jetzt weg.
-- [ ] Noch nicht getestet: **Erstinstallation über die GL-Paketseite** inkl. Binary-Download im postinst (Router ist jetzt
-      ohne NetBird, also der ideale Ausgangspunkt — Timeout-Verhalten der Paketseite beobachten).
+- [x] **Erstinstallation über die GL-Paketseite getestet (2026-10-25 01:18, Nutzer):** Feed → „Installieren“ → opkg holt das
+      55-KB-.ipk, postinst → `setup-router.sh install` → `netbird-fetch-binary` lädt das 46-MB-Release von GitHub auf den
+      Flash (Binary-mtime = Release-Build-Zeit, also frisch entpackt), Dienst gestartet, nginx neu gestartet (md5-Datei war
+      durch die Deinstallation weg). Zustand danach: Paket `0.1.0-1` mit 29 Dateien, Config byteidentisch (preinst/postinst),
+      kein `netbird-opkg`, Wrapper + `.gl`, Dashboard-Patch, Hook (2 Zeilen, kein Backup), beide Instanzen mit `respawn`,
+      `mgmt=Connected`, Kernel-WG, wt0 100.78.14.175, RSS 22,5 MB, MemAvailable 22,7 MB, nginx 3 Prozesse. Enrollment
+      aus `/etc/netbird` wurde ohne neuen Setup-Key weiterverwendet. ⇒ Beide Panel-Wege (Install, Uninstall) und der
+      Upgrade-Weg per opkg sind auf dem Opal verifiziert.
 - [x] **Nebenbefund analysiert (2026-10-25):** Daemon 25 min down, weil procd 2018-11-23 das `respawn`-Flag beim
       Wiederverwenden einer Instanz verliert (Upstream-Fix a30a8fd, 2019-04-17, nicht in GL 4.8.3). Details in
       `20-recherche.md`, „Vorfall 4“. **Fix umgesetzt + getestet (00:40):** `stop_service` via ubus-Instanz-Delete + Warten,
