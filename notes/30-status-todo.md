@@ -103,6 +103,11 @@
   als nicht-selektiertes Netzwerk ⇒ der Management-Server verteilt die Exit-Node-Route nicht an den Opal-Peer. Die
   Panel-Karte „Netzwerke & Exit-Nodes“ zeigt 1:1 das Gateway-Ergebnis (RPC `get_networks` → `nb_networks_json`).
 - `disable_client_routes=0`, kein `api_token` in UCI (Management-API daher nicht abfragbar), Dashboard-Login nicht möglich.
-- Vermutung: das ausgegraute „Disabled“ am Netzwerk (nicht an der Route) — Netzwerk aktivieren bzw. Policy für den
-  Opal-Peer auf die Exit-Node-Ressource anlegen; danach erscheint die Route in der Karte als inaktiv mit Schalter
-  (Auto Apply aus = Nutzer wählt sie im Panel oder per `netbird.connection.exit_node` + Hardware-Schalter „exitnode“).
+- **Gelöst (01:38): Fehlkonfiguration im Dashboard (Nutzer).** Danach: `ListNetworks` liefert „Exit Node – Deutschland
+  (IONOS)“ `0.0.0.0/0` selected=true; Daemon setzt `0.0.0.0/1` + `128.0.0.0/1` via wt0; Peer `ionos-exit-node` Connected
+  (Relay); Router-Public-IP = 82.165.153.21 = Public IP des Exit-Nodes; Panel-Karte zeigt den Eintrag aktiv mit Badge
+  „Exit-Node“ und Link „Für Schalter nutzen“. LAN-Clients folgen über Zone `netbird` (masq, lan→netbird).
+- GeoIP-Nebenfrage: wieistmeineip.de und das NetBird-Dashboard („Region: France“) zeigen Frankreich, ipinfo.io zeigt
+  Frankfurt/DE. RIPE-Registrierung des Blocks 82.165.153.0/24: netname `fr-nbz-ionos-cloud-nbz`, country **FR** —
+  IONOS hat das Netz unter der französischen Allokation eingetragen, obwohl der Server in Deutschland steht; die
+  GeoIP-Datenbanken folgen teils der Registrierung. Nicht beeinflussbar von unserer Seite.
