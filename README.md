@@ -45,6 +45,7 @@ opkg update && opkg install netbird-glinet
 ```
 
 - Needs ~50 MB free flash and internet access on the router; dependencies `curl` and `lua` are part of GL.iNet firmware.
+- On a 128 MB router `opkg update` alone can push free memory below the watchdog's guard threshold; NetBird is then stopped for the 120 s cooldown and comes back by itself. Expect a short VPN outage around package actions.
 - **Upgrade:** *Upgrade* in the panel or `opkg update && opkg upgrade netbird-glinet`. `/etc/config/netbird` is a conffile — your settings survive (opkg's `netbird-opkg` copy of the template is removed by `postinst`), and so does the enrollment in `/etc/netbird/`.
 - **Already installed with `install.sh`?** Installing the package on top is safe: files are identical, the config is kept, and the binary is only downloaded when the version differs (tested on the Opal: 41 s, no download).
 - **Remove:** `opkg remove netbird-glinet` (keeps `/etc/netbird` and `/etc/config/netbird`; delete those by hand for a full purge). `uninstall.sh` notices an opkg install and hands over to `opkg remove`.

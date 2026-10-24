@@ -52,10 +52,19 @@
       gestartet (`mgmt=Connected`, `wg=kernel`, RSS 27 MB, MemAvailable danach 24 MB), nginx verzögert neu gestartet
       (3 Prozesse, keine Waisen), Panel HTTP 200. opkg hat die unverwaltete Config selbst geschont und das Template als
       `/etc/config/netbird-opkg` abgelegt ⇒ `postinst` löscht diese Datei jetzt (auf dem Router manuell entfernt).
-- [ ] Noch nicht getestet: `opkg remove netbird-glinet` (prerm → `setup-router.sh uninstall --keep-files`), Upgrade auf eine
-      neuere Paketversion (prerm `upgrade`), Installation über die GL-Paketseite mit echtem Feed. Der Opal hat
-      `0.0.0+git16b0ebf-1` per opkg installiert (Dateien danach per install.sh aktualisiert) — der Feed bietet `0.1.0-1`,
-      also ist das Upgrade über die GL-Paketseite jetzt der nächste Test.
+- [x] **Upgrade über den echten Feed getestet (2026-10-25 01:00, per SSH):** Feed-Zeile in `/etc/opkg/customfeeds.conf`,
+      `opkg update` → Liste `netbird_glinet` (569 B), `opkg upgrade netbird-glinet` 0.0.0+git16b0ebf-1 → 0.1.0-1 in 26 s:
+      prerm `upgrade` (nur stop), postinst → setup-router (Binary erkannt, nginx unangetastet). Danach: Config byteidentisch,
+      `netbird-opkg` entfernt, Hook intakt, 29 Dateien, beide Instanzen mit `respawn`.
+      **Beobachtung:** `opkg update` (Entpacken der GL-Listen nach `/var/opkg-lists` = RAM, ~450 KB + opkg selbst) drückte
+      MemAvailable unter 9 MB ⇒ Memory Guard stoppte den Daemon zweimal (00:57, 00:58), dabei flackerte die DNS-Auflösung
+      (zwei Feed-Downloads „Failed to establish connection“, auch ein GL-Feed). Zweiter `opkg update` bei gestopptem
+      Daemon (30 MB frei) lief sauber. ⇒ Auf dem Opal Paketaktionen am besten bei gestopptem NetBird; procd + Cooldown
+      holten den Daemon danach automatisch zurück (Respawn-Fix bestätigt). Nach dem Neustart blieb der Status mehrere
+      Minuten auf `Connecting` (Management-Stream laut client.log verbunden, Peer-ICE „not initialized yet“, nur Relay) —
+      beobachten, ggf. unabhängig vom Paket.
+- [ ] Noch nicht getestet: `opkg remove netbird-glinet` (prerm `remove` → `setup-router.sh uninstall --keep-files`),
+      Installation/Upgrade über die GL-Paketseite (Timeout-Verhalten bei langem postinst).
 - [x] **Nebenbefund analysiert (2026-10-25):** Daemon 25 min down, weil procd 2018-11-23 das `respawn`-Flag beim
       Wiederverwenden einer Instanz verliert (Upstream-Fix a30a8fd, 2019-04-17, nicht in GL 4.8.3). Details in
       `20-recherche.md`, „Vorfall 4“. **Fix umgesetzt + getestet (00:40):** `stop_service` via ubus-Instanz-Delete + Warten,
