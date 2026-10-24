@@ -63,8 +63,14 @@
       holten den Daemon danach automatisch zurück (Respawn-Fix bestätigt). Nach dem Neustart blieb der Status mehrere
       Minuten auf `Connecting` (Management-Stream laut client.log verbunden, Peer-ICE „not initialized yet“, nur Relay) —
       beobachten, ggf. unabhängig vom Paket.
-- [ ] Noch nicht getestet: `opkg remove netbird-glinet` (prerm `remove` → `setup-router.sh uninstall --keep-files`),
-      Installation/Upgrade über die GL-Paketseite (Timeout-Verhalten bei langem postinst).
+- [x] **Deinstallation über die GL-Weboberfläche getestet (2026-10-25 01:14, Nutzer):** Paketseite zeigt `netbird-glinet 0.1.0-1`
+      mit Paketinformationen (Conffiles, Description), Knopf „Deinstallieren“ → prerm `remove` → `setup-router.sh uninstall
+      --keep-files`. Ergebnis read-only geprüft: Paket weg, alle 29 Dateien weg, Binary weg, Hook raus, `vpn-client` und
+      Dashboard-Bundle wieder GL-Original, Firewall-Zone weg, kein wt0, keine NETBIRD-Chains, resolv.conf normal, nginx mit
+      3 Prozessen, `/etc/netbird` + `/etc/config/netbird` erhalten. Einziger Rest: die leeren Verzeichnisse
+      `/usr/libexec/netbird` und `/usr/share/netbird-glinet` (opkg löscht nur Dateien) ⇒ `postrm` räumt sie jetzt weg.
+- [ ] Noch nicht getestet: **Erstinstallation über die GL-Paketseite** inkl. Binary-Download im postinst (Router ist jetzt
+      ohne NetBird, also der ideale Ausgangspunkt — Timeout-Verhalten der Paketseite beobachten).
 - [x] **Nebenbefund analysiert (2026-10-25):** Daemon 25 min down, weil procd 2018-11-23 das `respawn`-Flag beim
       Wiederverwenden einer Instanz verliert (Upstream-Fix a30a8fd, 2019-04-17, nicht in GL 4.8.3). Details in
       `20-recherche.md`, „Vorfall 4“. **Fix umgesetzt + getestet (00:40):** `stop_service` via ubus-Instanz-Delete + Warten,

@@ -30,7 +30,7 @@ done
 [ "$(sed -n 's/^Architecture: //p' "$T/c/control")" = all ] || die "Architecture must be all"
 grep -q '^Depends: curl, lua$' "$T/c/control" || die "Depends must be 'curl, lua'"
 [ "$(cat "$T/c/conffiles")" = "/etc/config/netbird" ] || die "conffiles must list /etc/config/netbird"
-for s in preinst postinst prerm; do
+for s in preinst postinst prerm postrm; do
     [ -x "$T/c/$s" ] || die "$s missing or not executable"
     sh -n "$T/c/$s" || die "$s has a syntax error"
 done
