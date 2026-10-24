@@ -2,7 +2,13 @@
 # (Packages, Packages.gz, .ipk) to GitHub Pages. The .ipk is also attached
 # to the GitHub release of that tag.
 #
-# One-time repository setting: Settings → Pages → Source: "GitHub Actions".
+# One-time repository settings:
+#   1. Settings → Pages → Source: "GitHub Actions"
+#   2. Settings → Environments → github-pages → Deployment branches and tags:
+#      add a tag rule "v*" (the environment only allows "main" by default and
+#      rejects the deploy job with "Tag … is not allowed to deploy").
+#      Same via API:
+#      gh api -X POST repos/<owner>/<repo>/environments/github-pages/deployment-branch-policies -f name='v*' -f type=tag
 # Feed URL afterwards: https://<owner>.github.io/<repo>
 name: opkg feed
 

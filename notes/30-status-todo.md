@@ -39,8 +39,13 @@
 - [x] `packaging/build.sh` + `check.sh`, Paket `netbird-glinet` (all), `setup-router.sh` als einzige Router-Logik,
       `netbird-fetch-binary`, Workflow `feed.yml`, README-Abschnitt „Install via opkg feed“. Lokal gebaut und validiert;
       `install.sh --probe` läuft mit dem Umbau; Skripte mit der BusyBox-ash des Routers `sh -n`-geprüft.
-- [ ] GitHub: Repo-Settings → Pages → Source „GitHub Actions“ aktivieren, dann ersten Tag `v0.1.0` pushen und den
-      Workflow-Lauf prüfen (Pages-URL, Release-Asset).
+- [x] **Feed veröffentlicht (2026-10-25 ~01:00):** PR #1 gemerged, Pages auf „GitHub Actions“, Tag `v0.1.0`. Erster
+      Deploy-Job abgelehnt („Tag v0.1.0 is not allowed to deploy to github-pages“) — die Umgebung `github-pages` erlaubt
+      standardmäßig nur `main`; Tag-Regel `v*` per API angelegt, Job neu gestartet, erfolgreich. Geprüft:
+      `https://schlichtercode.github.io/netbird-glinet-openwrt/Packages.gz` → `netbird-glinet 0.1.0-1`, .ipk abrufbar,
+      SHA256 stimmt mit Index überein; Release `v0.1.0` hat .ipk + Packages + Packages.gz.
+      Push-Hinweis: der HTTPS-Token im Schlüsselbund hatte keinen `workflow`-Scope (Push mit Workflow-Datei abgelehnt);
+      Push per SSH-Key funktioniert, Nutzer hat den Token per `gh auth refresh -s workflow` erweitert.
 - [x] **2026-10-25 00:15 auf dem Opal getestet:** `opkg install /root/netbird-glinet_0.0.0+git16b0ebf-1_all.ipk`
       über die bestehende install.sh-Installation (MemAvailable vorher 31,7 MB). Ergebnis: 41 s, rc=0, 29 Dateien
       verwaltet, `/etc/config/netbird` byteidentisch (md5 8490dc44…), Binary 0.81.4 erkannt ⇒ kein Download, Dienst
@@ -48,7 +53,9 @@
       (3 Prozesse, keine Waisen), Panel HTTP 200. opkg hat die unverwaltete Config selbst geschont und das Template als
       `/etc/config/netbird-opkg` abgelegt ⇒ `postinst` löscht diese Datei jetzt (auf dem Router manuell entfernt).
 - [ ] Noch nicht getestet: `opkg remove netbird-glinet` (prerm → `setup-router.sh uninstall --keep-files`), Upgrade auf eine
-      neuere Paketversion (prerm `upgrade`), Installation über die GL-Paketseite mit echtem Feed.
+      neuere Paketversion (prerm `upgrade`), Installation über die GL-Paketseite mit echtem Feed. Der Opal hat
+      `0.0.0+git16b0ebf-1` per opkg installiert (Dateien danach per install.sh aktualisiert) — der Feed bietet `0.1.0-1`,
+      also ist das Upgrade über die GL-Paketseite jetzt der nächste Test.
 - [x] **Nebenbefund analysiert (2026-10-25):** Daemon 25 min down, weil procd 2018-11-23 das `respawn`-Flag beim
       Wiederverwenden einer Instanz verliert (Upstream-Fix a30a8fd, 2019-04-17, nicht in GL 4.8.3). Details in
       `20-recherche.md`, „Vorfall 4“. **Fix umgesetzt + getestet (00:40):** `stop_service` via ubus-Instanz-Delete + Warten,
