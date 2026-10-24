@@ -49,10 +49,12 @@
       `/etc/config/netbird-opkg` abgelegt ⇒ `postinst` löscht diese Datei jetzt (auf dem Router manuell entfernt).
 - [ ] Noch nicht getestet: `opkg remove netbird-glinet` (prerm → `setup-router.sh uninstall --keep-files`), Upgrade auf eine
       neuere Paketversion (prerm `upgrade`), Installation über die GL-Paketseite mit echtem Feed.
-- [ ] **Nebenbefund:** Vor der Installation war der Daemon seit 23:48 down (`hold-until` 23:48:34 längst abgelaufen),
-      der Watchdog loggte 25 min lang nur „daemon socket missing (procd will respawn)“ ohne Neustart. Watchdog sollte
-      nach N Intervallen ohne Socket `/etc/init.d/netbird restart` auslösen; Ursache (procd respawn erschöpft? run-daemon
-      hängt?) per `ubus call service list '{"name":"netbird"}'` prüfen.
+- [x] **Nebenbefund analysiert (2026-10-25):** Daemon 25 min down, weil procd 2018-11-23 das `respawn`-Flag beim
+      Wiederverwenden einer Instanz verliert (Upstream-Fix a30a8fd, 2019-04-17, nicht in GL 4.8.3). Details + drei
+      Code-Konsequenzen in `20-recherche.md`, „Vorfall 4“. **Offen: umsetzen** (Watchdog-Selbststart, `stop_service` via
+      `ubus service delete instance` + Warten, Guard-Nachprüfung). Bis dahin: nach jedem externen Kill bleibt der Daemon tot.
+- [x] Schalter-Dropdown zeigte `vpn.sh.pre-netbird` (GL listet alles in `/etc/gl-switch.d/`): Backup entfällt,
+      `setup-router.sh` räumt alte Backups weg; auf dem Router gelöscht (2026-10-25).
 - [ ] Offen: Verhalten der GL-Paketseite bei mehrminütigem `postinst` (Timeout?) — ggf. Download in den Hintergrund
       (procd-Instanz) verlagern.
 - [ ] `install.sh --skip-binary` gegen den Router laufen lassen (nutzt jetzt `setup-router.sh`), danach Panel neu laden.

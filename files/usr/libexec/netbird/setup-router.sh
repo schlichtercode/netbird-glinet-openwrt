@@ -124,19 +124,22 @@ remove_old_layout() {
 
 # Hardware toggle switch: /etc/gl-switch.d/vpn.sh is GL.iNet's handler for the
 # "VPN client" switch function; two appended lines hand the event to switch.sh.
+# No backup copy: GL lists every file in /etc/gl-switch.d/ as a switch
+# function in the panel, so a vpn.sh.pre-netbird would show up there. The two
+# lines are marked and removed exactly by unhook_switch.
 hook_switch() {
     if [ -f "$SWITCH_HOOK" ] && ! grep -q "netbird/switch.sh" "$SWITCH_HOOK"; then
-        cp "$SWITCH_HOOK" "$SWITCH_HOOK.pre-netbird"
         printf '\n# netbird-glinet-openwrt: let the switch also control NetBird (uninstall removes this)\n[ -x /usr/libexec/netbird/switch.sh ] && /usr/libexec/netbird/switch.sh "$1"\n' >> "$SWITCH_HOOK"
-        ok "hooked $SWITCH_HOOK (backup: $SWITCH_HOOK.pre-netbird)"
+        ok "hooked $SWITCH_HOOK"
     fi
+    rm -f "$SWITCH_HOOK.pre-netbird"   # backup left by older installers
     ok "hardware switch: NetBird follows the \"VPN client\" switch function"
 }
 unhook_switch() {
     if [ -f "$SWITCH_HOOK" ] && grep -q "netbird/switch.sh" "$SWITCH_HOOK"; then
         sed -i '/netbird-glinet-openwrt: let the switch/d; /netbird\/switch.sh/d' "$SWITCH_HOOK"
-        rm -f "$SWITCH_HOOK.pre-netbird"
     fi
+    rm -f "$SWITCH_HOOK.pre-netbird"
 }
 
 # GL panel: VPN indicator + VPN Dashboard card. Wrap GL's vpn-client RPC

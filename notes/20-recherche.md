@@ -172,3 +172,35 @@ Release mit Go 1.25, Juli 2026); andere Architekturen bekommen 0.81.4. Sobald Go
   (HTTP 200, 1,4 s für die Checksummen-Datei).
 - Overlay: 60 MB frei **mit** installiertem Binary ⇒ Side-by-side-Download (46 MB) passt knapp; `netbird-fetch-binary`
   löscht sonst das alte Binary vorher (Dienst ist dann ohnehin gestoppt).
+
+## Vorfall 4 (2026-10-24 23:47 – 00:13): Daemon 25 min down, procd hat **nicht** respawnt (analysiert 2026-10-25, read-only)
+Ablauf (logread + client.log): 23:46:00 und 23:46:34 Memory Guard (6–8 MB frei) → `nb_kill_daemon`, `hold-until` 23:48:34;
+Daemon braucht unter Druck 60 s zum Beenden (21:46:09Z „shutdown signal“ → 21:47:05Z „stopped NetBird service“). Danach
+**kein** Start mehr im client.log bis 22:12:53Z (= Dienst-Neustart durch die opkg-Installation). Watchdog loggte alle 5 min
+nur „daemon socket missing (procd will respawn)“.
+
+**Ursache: procd-Bug, Instanz hat kein `respawn` mehr.** `ubus call service list '{"name":"netbird"}'` zeigt für `watchdog`
+ein `respawn {3600,10,0}`, für `daemon` **keines** — obwohl das Init-Skript beide gleich setzt (per Dry-Run der procd.sh-JSON
+bestätigt: `"respawn": ["3600","10","0"]`). procd auf dem Opal: `2018-11-23-d6673547`. Quelle (service/instance.c@d6673547):
+- `instance_stop()` setzt `in->restart = in->respawn = false` (Zeile 575), wenn die Instanz läuft.
+- `instance_config_move()` kopiert beim Wiederverwenden einer Instanz `respawn_retry/threshold/timeout`, aber **nicht** das
+  Flag `in->respawn`. `instance_update()` nutzt für eine nicht (mehr) laufende alte Instanz genau diesen Pfad
+  (`instance_config_move` + `instance_start`). Die Instanz-Liste hat `no_delete = true`, eine nicht laufende Instanz
+  bleibt daher über ein `service delete` hinweg erhalten und wird vom nächsten `set` wiederverwendet.
+- `instance_exit()`: ohne `halt`/`restart`/`respawn` passiert **nichts** — der Daemon bleibt tot, bis jemand `start` ruft.
+- Upstream-Fix: procd-Commit **a30a8fd (2019-04-17) „procd: copy the respawn property of new instance“** — Commit-Text:
+  „the respawning does not happen, if the process is killed externally“. GL 4.8.3 (18.06) hat den Fix nicht.
+- Folge: Sobald procd einmal eine *laufende* Daemon-Instanz selbst gestoppt hat (`service delete` trifft einen noch laufenden
+  Prozess — belegt durch 3× „Instance netbird::daemon … not stopped on SIGTERM, sending SIGKILL“ um 23:32/23:36/23:42, u. a.
+  wenn `nb_kill_daemon` nur `netbird`-Prozesse sieht, die Instanz aber gerade `run-daemon.sh` im Cooldown-Sleep ist) und der
+  sofort folgende `start` die Instanz wiederverwendet, läuft der Daemon **ohne respawn**. Jeder externe Kill (Memory Guard,
+  OOM-Killer, Crash) ist dann endgültig. Aktueller Zustand nach der opkg-Installation: Daemon-Instanz wieder ohne `respawn`.
+
+Konsequenzen für den Code (noch nicht umgesetzt):
+1. Watchdog darf sich nicht auf procd verlassen: Socket fehlt, `enabled=1`, kein aktiver `hold-until` ⇒ nach einem
+   Intervall `/etc/init.d/netbird start` (statt „procd will respawn“).
+2. `stop_service`: Daemon-Instanz über procd beenden (`ubus call service delete '{"name":"netbird","instance":"daemon"}'`)
+   und warten, bis sie aus `ubus call service list` verschwunden ist (≤ term_timeout + 5 s). Dann legt `start` eine **frische**
+   Instanz mit `respawn` an; das Wiederverwenden entfällt. Deckt auch den Cooldown-Sleep ab (procd killt die sh).
+3. Memory Guard: nach Ablauf des Cooldowns prüft der Watchdog-Loop selbst, ob der Daemon zurück ist (siehe 1).
+Diagnose-Kommando: `ubus call service list '{"name":"netbird"}'` — fehlt `respawn` unter `daemon`, ist der Zustand aktiv.
