@@ -94,3 +94,15 @@
 - [ ] `fw3 reload` → bleiben `NETBIRD-*`-Chains erhalten? (`iptables-save | grep NETBIRD`)
 - [ ] Peer-Ping in beide Richtungen, LAN-Zugriff über NetBird, ggf. Exit-Node
 - [ ] Reboot → kommt der Daemon via procd hoch und verbindet ohne Setup-Key?
+
+## Exit-Node fehlt in der Panel-Karte (2026-10-25 01:30) — Verteilung im Dashboard, kein Panel-Fehler
+- Dashboard des Nutzers: Netzwerk „Exit Node – Deutschland (IONOS)“, Routing-Peer `ionos-exit-node`, Metric 9999, Route
+  ACTIVE, Distribution Groups „All“, Access Control Groups „-“, Auto Apply aus; im Kopf der Netzwerk-Zeile steht ein
+  ausgegrautes „Disabled“.
+- Opal: `ListNetworks` am Daemon-Gateway liefert nur `MGMT Network 172.16.10.0/24` (selected). Kein `0.0.0.0/0`, auch nicht
+  als nicht-selektiertes Netzwerk ⇒ der Management-Server verteilt die Exit-Node-Route nicht an den Opal-Peer. Die
+  Panel-Karte „Netzwerke & Exit-Nodes“ zeigt 1:1 das Gateway-Ergebnis (RPC `get_networks` → `nb_networks_json`).
+- `disable_client_routes=0`, kein `api_token` in UCI (Management-API daher nicht abfragbar), Dashboard-Login nicht möglich.
+- Vermutung: das ausgegraute „Disabled“ am Netzwerk (nicht an der Route) — Netzwerk aktivieren bzw. Policy für den
+  Opal-Peer auf die Exit-Node-Ressource anlegen; danach erscheint die Route in der Karte als inaktiv mit Schalter
+  (Auto Apply aus = Nutzer wählt sie im Panel oder per `netbird.connection.exit_node` + Hardware-Schalter „exitnode“).
