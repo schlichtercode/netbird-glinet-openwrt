@@ -4,6 +4,58 @@
 
 Fork of [devNalyx/netbird-openwrt](https://github.com/devNalyx/netbird-openwrt), reworked for small MIPS routers and for a native GL.iNet integration (no extra web UI, no nginx/CGI hacks).
 
+## Install from the GL.iNet package manager (recommended)
+
+No computer, no SSH: the router installs NetBird itself from this project's package feed. Takes about five minutes.
+
+**What you need**
+
+- A GL.iNet router with firmware 4.x (the SDK4 admin panel). Reference device: GL-SFT1200 Opal with 4.8.3.
+- About 50 MB free flash (*System → Overview* shows it) and internet access on the router.
+- A NetBird account: a **management URL** (cloud: `https://api.netbird.io:443`, self-hosted: your URL **with port**) and a **reusable setup key** (NetBird dashboard → *Setup Keys* → *Create*).
+
+**1. Add the package source**
+
+In the admin panel open *Applications → Plug-ins* (German panel: *Anwendungen → Softwarepakete*), open the package *Sources* and add this line:
+
+```
+src/gz netbird_glinet https://schlichtercode.github.io/netbird-glinet-openwrt
+```
+
+Save, then click *Update* so the router fetches the package list.
+
+**2. Install the package**
+
+Search for `netbird-glinet` and click *Install*. The package is tiny; during the install the router downloads the NetBird program (about 46 MB) from GitHub and writes it to flash. On a MIPS router this takes two to four minutes, so leave the page open. If the panel stops waiting before it is done, the install still finishes in the background. Open the panel's VPN section after a few minutes.
+
+On a 128 MB router the VPN, if it was already running, may drop for two minutes during this step: the memory guard pauses NetBird while the package manager works and brings it back by itself.
+
+**3. Connect**
+
+Go to *VPN → NetBird*. Enter the management URL (with port) and the setup key, click *Connect*. After a moment the page shows *Connected*, the NetBird IP and the peers. The enrollment survives reboots; the setup key is not needed again.
+
+**Updating:** when a new version is in the feed, the Plug-ins page offers *Upgrade* for `netbird-glinet`. Your settings and the enrollment are kept.
+
+**Removing:** uninstall `netbird-glinet` on the Plug-ins page. Settings (`/etc/config/netbird`) and the enrollment (`/etc/netbird`) stay on the router; delete them over SSH if you want a full purge.
+
+**Over SSH instead of the panel**
+
+```bash
+echo 'src/gz netbird_glinet https://schlichtercode.github.io/netbird-glinet-openwrt' >> /etc/opkg/customfeeds.conf
+opkg update && opkg install netbird-glinet
+```
+
+Upgrade with `opkg update && opkg upgrade netbird-glinet`, remove with `opkg remove netbird-glinet`.
+
+**If something goes wrong**
+
+- *The VPN page says the NetBird program is missing / the service does not start.* The binary download failed (no internet, GitHub unreachable, flash full). Over SSH run `netbird-fetch-binary`; it prints the reason, then run `/etc/init.d/netbird restart`.
+- *The panel shows "Setup key required".* Create a **reusable** setup key in the NetBird dashboard and enter it.
+- *Connection cycles / "missing port in address".* The management URL needs the port, for example `https://netbird.example.com:443`.
+- *After a GL.iNet firmware update the VPN indicator no longer shows NetBird.* The update restored GL's original files. Reinstall the package, or run `/usr/libexec/netbird/setup-router.sh install --no-fetch` over SSH.
+
+Details for the curious: the package `netbird-glinet` is `Architecture: all` (shell, Lua and panel files, about 55 KB). The NetBird binary is deliberately not inside it, because opkg unpacks packages through `/tmp`, which is RAM on OpenWrt; `postinst` streams it from the GitHub release straight to flash and verifies the SHA256. Installing the package over an existing `install.sh` setup is safe: the config is kept and the binary is only downloaded when the version differs. Change the pinned NetBird version with `netbird-fetch-binary --version 0.77.1`; the default lives in `/usr/share/netbird-glinet/netbird-release`.
+
 ## What you get
 
 - **NetBird page inside the GL.iNet admin panel** (VPN → NetBird), in all seven panel languages (en, de, es, it, ja, zh-cn, zh-tw). Enrol with a setup key, see peers, memory and DNS state, restart, toggle the exit node, edit every setting. Protected by the panel login like every other GL page.
@@ -12,7 +64,7 @@ Fork of [devNalyx/netbird-openwrt](https://github.com/devNalyx/netbird-openwrt),
 - **Shows up like a GL VPN**: the VPN indicator on the Internet page lights up while NetBird is connected, and the VPN Dashboard gets a "NetBird" card (type, server, virtual IP, traffic, ON/OFF switch).
 - **NetBird DNS fully usable**: peer names and DNS routes work on the router *and* for every LAN client — the watchdog publishes NetBird's domains to GL's dnsmasq as forwarders.
 - **GL-native firewall zone** `netbird` for `wt0` (masquerade, lan→netbird, netbird→wan) so LAN clients can use NetBird routes / exit nodes and the router can be an exit node itself.
-- **Two ways to install**: an **opkg feed** you add in the GL.iNet panel (Applications → Software packages → Sources) and then install/upgrade `netbird-glinet` like any other package — or the **one-command installer** `install.sh` from your computer, which also prints a compatibility report. Both stream the NetBird binary straight onto flash (never through RAM-backed `/tmp`); `uninstall.sh` / `opkg remove` take everything out again.
+- **Two ways to install**: the **package feed** you add in the GL.iNet panel (Applications → Plug-ins → Sources) and then install/upgrade `netbird-glinet` like any other package — or the **one-command installer** `install.sh` from your computer, which also prints a compatibility report. Both stream the NetBird binary straight onto flash (never through RAM-backed `/tmp`); `uninstall.sh` / `opkg remove` take everything out again.
 - Tuned for 128 MB routers: `GOGC`/`GOMEMLIMIT`, kernel WireGuard, no CLI forks from the web path, optional USB swap helper.
 
 ## Supported hardware
@@ -25,36 +77,9 @@ Fork of [devNalyx/netbird-openwrt](https://github.com/devNalyx/netbird-openwrt),
 
 Requirements on the router: `kmod-wireguard` (bundled in GL firmware), `kmod-tun`, `iptables` + `ipset`, `curl`, `lua` (all present on GL.iNet 4.x). Free flash: ~50 MB for the binary.
 
-## Install via opkg feed
+## Install with install.sh (alternative, from your computer)
 
-The feed is published to GitHub Pages by the release workflow: **`https://schlichtercode.github.io/netbird-glinet-openwrt`**. The package `netbird-glinet` is `Architecture: all` (~55 KB of shell, Lua and panel files); its `postinst` downloads the matching NetBird binary (~46 MB) from GitHub straight onto flash and verifies the SHA256 — it never passes through `/tmp` (RAM).
-
-**In the GL.iNet panel:** Applications → *Software packages* (Plug-ins) → *Sources* → add
-
-```
-src/gz netbird_glinet https://schlichtercode.github.io/netbird-glinet-openwrt
-```
-
-then *Update*, search for `netbird-glinet`, *Install*. The first install takes a few minutes on a MIPS router (binary download + write to flash); if the panel gives up waiting, the install still finishes in the background — check with `logread -e netbird` or run `netbird-fetch-binary` over SSH.
-
-**Over SSH:**
-
-```bash
-echo 'src/gz netbird_glinet https://schlichtercode.github.io/netbird-glinet-openwrt' >> /etc/opkg/customfeeds.conf
-opkg update && opkg install netbird-glinet
-```
-
-- Needs ~50 MB free flash and internet access on the router; dependencies `curl` and `lua` are part of GL.iNet firmware.
-- On a 128 MB router `opkg update` alone can push free memory below the watchdog's guard threshold; NetBird is then stopped for the 120 s cooldown and comes back by itself. Expect a short VPN outage around package actions.
-- **Upgrade:** *Upgrade* in the panel or `opkg update && opkg upgrade netbird-glinet`. `/etc/config/netbird` is a conffile — your settings survive (opkg's `netbird-opkg` copy of the template is removed by `postinst`), and so does the enrollment in `/etc/netbird/`.
-- **Already installed with `install.sh`?** Installing the package on top is safe: files are identical, the config is kept, and the binary is only downloaded when the version differs (tested on the Opal: 41 s, no download).
-- **Remove:** `opkg remove netbird-glinet` (keeps `/etc/netbird` and `/etc/config/netbird`; delete those by hand for a full purge). `uninstall.sh` notices an opkg install and hands over to `opkg remove`.
-- **After a GL firmware update** that kept your settings, GL's original `vpn-client` object and dashboard bundle are back: run `/usr/libexec/netbird/setup-router.sh install --no-fetch` (or reinstall the package).
-- **Change the pinned NetBird version:** `netbird-fetch-binary --version 0.77.1` (the package default is in `/usr/share/netbird-glinet/netbird-release`).
-
-## Install with install.sh
-
-On your computer (macOS/Linux), with SSH access to the router:
+For development, for routers without internet access, or if you prefer to drive it from your computer (macOS/Linux) with SSH access to the router:
 
 ```bash
 git clone https://github.com/schlichtercode/netbird-glinet-openwrt.git
