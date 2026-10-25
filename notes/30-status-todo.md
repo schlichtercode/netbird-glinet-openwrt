@@ -126,3 +126,22 @@
   auf dem Server `ss -lun | grep 51820`, `nft list ruleset` / `ufw status`. Danach sollte das Panel „P2P“ statt
   „Relayed“ zeigen.
 - Erwartungswert nach P2P: Kernel-WireGuard auf dem Opal + 2,4-GHz-HT20-Uplink ⇒ realistisch 50–80 Mbit/s, nicht mehr.
+
+### Ergebnis (01:55): Ursache ist eine Candidate-Race in NetBird auf langsamer Hardware, Relay-Pfad ist CPU-limitiert
+- IONOS-Firewall: UDP 51820 ist **offen** (Screenshot „My firewall policy“). Verdacht Firewall erledigt.
+- Live-Status: beide Peers `relayed=true`, WG-Endpoint `127.0.0.1:46831` (NetBirds Relay-Proxy), **keine** lokalen
+  ICE-Kandidatentypen (`localIceCandidateType` leer). State-Dump: `RemoteCandidate: 20`, dazu **19×** „ICE Agent is not
+  initialized yet“. Quelle `client/internal/peer/worker_ice.go@v0.81.4` Z. 160–167: `OnRemoteCandidate` verwirft den
+  Kandidaten, wenn `w.agent == nil` — **kein Puffer**. Der Agent entsteht erst in `OnNewOffer`; Offer/Answer und die
+  Kandidaten der Gegenseite kommen quasi gleichzeitig, der Opal (531 BogoMIPS, GC-Druck) ist mit der Agent-Erzeugung
+  noch nicht fertig ⇒ fast alle Remote-Kandidaten gehen verloren ⇒ ICE kann nie ein Paar bilden ⇒ dauerhaft Relay.
+  Lazy Connection ist aktiv (Gegenseite initiiert, „activate peer … by remote signal message“), was die Race verschärft.
+  Keine Fehlerzeile im Log; `env_linux.go: failed to dial with fwmark … falling back to legacy routing` ist separat
+  (Kernel 4.14) und harmlos. Bug-Report an netbirdio/netbird sinnvoll (Remote-Kandidaten puffern bis Agent existiert).
+- Durchsatzmessung vom Router durch den Tunnel (curl 20 MB von speed.cloudflare.com über Exit-Node): **5,2 Mbit/s**;
+  CPU dabei 82 % aller 4 logischen Kerne ausgelastet, der NetBird-Daemon allein 48 % der Gesamtkapazität (≈1,8 Kerne).
+  Speedtest des Nutzers mit VPN: 6,9/5,9 Mbit/s, Ping 51 ms, Jitter 307 ms; ohne VPN 36/72 Mbit/s.
+  ⇒ Relay-Pfad (userspace Go: QUIC/TLS zum Relay + UDP-Proxy zu Kernel-WG) ist auf dem Opal CPU-limitiert.
+- Hebel: 1) P2P erreichen (Kernel-WG direkt, kaum Userspace-CPU) — braucht den NetBird-Fix oder einen eigenen Build mit
+  Kandidaten-Puffer (Build-Umgebung aus der Go-Bisektion vorhanden); 2) Lazy Connection im Dashboard abschalten (hilft nur
+  teilweise, die Race bleibt); 3) weniger CPU-Konkurrenz (nginx-Worker). Ohne P2P bleibt es bei ~5–7 Mbit/s.
