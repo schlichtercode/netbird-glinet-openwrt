@@ -176,3 +176,43 @@
   Traceroute 1. Hop 172.16.11.254. Routing über den Exit-Node vom Router aus ist korrekt (Public IP 82.165.153.21).
 - Daemon-CPU im Leerlauf 39 % eines Kerns (GOMEMLIMIT=32MiB bei 22 MB RSS ⇒ GC-Druck?) — Kandidat für Tuning, RAM ist knapp.
 - Beide Patches gehören upstream gemeldet: (1) Remote-Kandidaten puffern, (2) fwmark-Probe-Timeout 100 ms → länger.
+
+## Swap auf USB-Stick eingerichtet (2026-10-25 03:05)
+- Anlass: 02:53 **Kernel-OOM-Kill von NetBird** (anon-rss 15 MB) während der Paketaktion im GL-Panel; dmesg zugleich
+  `[wdt_error] cpu:1/2 not feed wdt` (CPU stand beim Thrash still). procd + Cooldown brachten den Daemon zurück.
+  Panel-Upgrade auf 0.1.1-1 kam dabei nicht durch (opkg status weiterhin 0.1.0-1).
+- `netbird-setup-swap` (Default 256 MB) auf dem gesteckten SanDisk Ultra Fit 64 GB (FAT32, `/mnt/sda1`): `dd` brauchte
+  **5:38 min**, weil der Stick mit `sync` gemountet ist (block-mount-Default für vfat). Danach `swapon` ok,
+  `/proc/swaps`: 262096 kB, 11 Extents, Priority -2; fstab `@swap[0]` device=/mnt/sda1/netbird.swap enabled=1,
+  `auto_swap=1` ⇒ kommt nach Reboot wieder (block-mount). Swap-I/O geht am Dateisystem vorbei, `sync` bremst den
+  Swap nicht. FAT ignoriert chmod 600 (Datei bleibt 777) — unkritisch.
+- MemAvailable ändert sich durch Swap nicht (11–13 MB); Entlastung kommt erst, wenn der Kernel inaktive Seiten (nginx-
+  Worker bei geschlossenem Panel) auslagert. `vm.swappiness` = 60 (Default).
+- **Erledigt (03:15):** Guard swap-bewusst — `nb_mem_guard_threshold_kb`: bei SwapFree ≥ 64 MB halbiert sich `mem_min_kb`
+  (9216 → 4608), Log-Zeile des Watchdogs zeigt `swap_used=` und `guard_min=`; `vm.swappiness=80` in
+  `/etc/sysctl.d/90-netbird.conf`. Per `install.sh --skip-binary` eingespielt. Dabei feuerte der Guard noch einmal mit der
+  alten Schwelle (Datei-Push drückte MemAvailable auf 9,1 MB), Cooldown 101 s, danach Daemon Connected, ~9 MB im Swap.
+  Router-Uhr läuft auf CET (UTC+1), client.log in UTC, Mac in CEST — bei Log-Vergleichen beachten.
+- (alt) Memory Guard (`nb_mem_guard`, Schwelle `mem_min_kb` 9216) war nicht swap-bewusst — er stoppt NetBird bei
+  MemAvailable < 9 MB, obwohl der Kernel jetzt auslagern könnte. Vorschlag: bei SwapFree > 64 MB Schwelle auf ~4 MB
+  senken oder Guard auf `MemAvailable + SwapFree`-Logik umstellen; `swappiness` ggf. auf 80–100.
+- Zum Auslagern von nginx: keine cgroups im Kernel, keine Prozess-Zuweisung möglich; LRU erledigt es bei Inaktivität.
+  Alternative ohne Stick wäre zram (`kmod-zram`, `zram-swap` im GL-Feed vorhanden), kostet CPU.
+
+## Reboot um 02:48, OOM-Kill, Rest-Tunnel ohne Daemon (2026-10-25 03:15–03:40)
+- Opal rebootete ~02:48 CET (Ursache unbekannt, Verbindung zum Mac riss gleichzeitig ab; davor `wdt_error … not feed wdt`).
+  **Nach dem Reboot war der Swap nicht aktiv** (SwapTotal 0): block-mount aktiviert eine Swap-*Datei* nur, wenn der Stick
+  beim `block mount` der fstab-Init schon gemountet ist; der Stick kommt per Hotplug später.
+- 03:18:46 Kernel-OOM-Kill von NetBird (SIGKILL) bei 4 parallelen `opkg`-Prozessen der GL-Paketseite (Upgrade auf 0.1.1-1
+  erneut nicht durchgelaufen). 03:19:03 Aktion „stop“ (Panel/Dashboard) ⇒ enabled=0.
+- **Befund:** Ohne Daemon tunnelte der Kernel weiter: `wt0` UP, beide WG-Peers mit frischen Handshakes (254 MB Transfer),
+  Tabelle `netbird` + ip rules 105/110 vorhanden ⇒ Mac (jetzt am Opal-LAN) ging über den Exit-Node, Speedtest 49,7/34,4
+  Mbit/s (P2P + LAN), Panel sagte korrekt „Deaktiviert“. SIGKILL lässt NetBird nichts aufräumen; unser `stop_service`
+  räumte nur DNS/resolv.
+- 03:21 Swap wieder aktiv (Stick umgesteckt/hotplug). 03:30 NetBird per `uci enabled=1` + start reaktiviert: Daemon übernahm
+  das vorhandene wt0 nahtlos (advanced routing, beide Peers „connection succeeded“, Panel Verbunden/P2P).
+- **Fixes (03:35 eingespielt, Commit folgt):** `nb_swap_ensure` (fstab-Swap-Einträge aktivieren, falls Datei da und nicht
+  in /proc/swaps) in `start_service`, Watchdog-`pass` und neuem `/etc/hotplug.d/block/90-netbird-swap`;
+  `nb_tunnel_teardown` in `stop_service` (nur wenn kein Daemon lebt: `ip link del wt0`, NetBird-ip-rules, NETBIRD-Chains).
+  Getestet: No-op-Pfade (Swap aktiv, Daemon lebt). **Echter Test des Hotplug-Pfads = nächster Reboot.**
+- Sperren-Fix griff real: 03:31:30 „breaking stale status lock (34s old)“.

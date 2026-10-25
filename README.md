@@ -172,7 +172,7 @@ Turn the coupling off with `settings.hw_switch = 0`. `uninstall.sh` removes the 
 
 ## Memory on 128 MB routers
 
-Measured on the Opal: daemon ≈ 17 MB RSS idle, GL's own nginx ≈ 45 MB, ~30 MB left. Check with `netbird-status` or `logread -e netbird` (`rss=… mem_avail=…` every 5 min). If it gets tight: plug in a USB stick and run `netbird-setup-swap` (creates a 256 MB swap file there and persists it in `/etc/config/fstab`). Swap on the router's own NAND is impossible (UBIFS) and would wear it out.
+Measured on the Opal: daemon ≈ 17 MB RSS idle, GL's own nginx ≈ 45 MB, ~30 MB left. Check with `netbird-status` or `logread -e netbird` (`rss=… mem_avail=…` every 5 min). If it gets tight: plug in a USB stick and run `netbird-setup-swap` (creates a 256 MB swap file there and persists it in `/etc/config/fstab`; on a FAT32 stick mounted with `sync` the `dd` takes a few minutes). With at least 64 MB of swap free the watchdog's memory guard halves its threshold (`mem_min_kb` 9216 → 4608 kB), so the kernel gets to page out idle memory (nginx workers) before NetBird is paused; `vm.swappiness=100` is set for that. The watchdog log line shows `swap_used=` and the effective `guard_min=`. Swap on the router's own NAND is impossible (UBIFS) and would wear it out.
 
 ## Troubleshooting
 

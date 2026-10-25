@@ -15,6 +15,7 @@ start_service() {
     [ "$NB_ENABLED" = 1 ] || { nb_log "disabled in /etc/config/netbird"; return 0; }
     # opkg install without internet / interrupted download: no binary yet
     [ -x "$NB_BIN" ] || { nb_log "$NB_BIN missing — run netbird-fetch-binary"; return 0; }
+    nb_swap_ensure
     nb_prepare_dirs
     nb_invalidate_status
 
@@ -59,6 +60,8 @@ stop_service() {
     # start — and procd 2018 re-uses it without its respawn flag once that
     # was lost (notes/20-recherche.md, Vorfall 4).
     nb_procd_stop_instances 30
+    # an OOM-killed daemon leaves wt0 + rules behind: stop must still mean stop
+    nb_tunnel_teardown
     rm -f "$NB_SOCK"
     nb_invalidate_status
     nb_dns_sync clear
