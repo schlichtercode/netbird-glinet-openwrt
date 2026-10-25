@@ -145,3 +145,21 @@
 - Hebel: 1) P2P erreichen (Kernel-WG direkt, kaum Userspace-CPU) — braucht den NetBird-Fix oder einen eigenen Build mit
   Kandidaten-Puffer (Build-Umgebung aus der Go-Bisektion vorhanden); 2) Lazy Connection im Dashboard abschalten (hilft nur
   teilweise, die Race bleibt); 3) weniger CPU-Konkurrenz (nginx-Worker). Ohne P2P bleibt es bei ~5–7 Mbit/s.
+
+### Eigener NetBird-Build mit Patches (2026-10-25 02:20–02:40) — Stand
+- `packaging/build-netbird.sh` + `packaging/patches/`: klont v<ver>, wendet die Patches an, baut `linux/mipsle softfloat`
+  (CGO_ENABLED=0, -trimpath -s -w, version=0.81.4), legt das Binary nach `.cache/<ver>-mipsle_softfloat/` ⇒
+  `./install.sh <router> --force` lädt es hoch. Go 1.27.3 + Toolchain 1.26.10 auf dem Mac, Build ~4 s (Cache warm).
+- Patch 1 `buffer-remote-candidates`: `OnRemoteCandidate` puffert bis `OnNewOffer` den Agenten erzeugt hat. **Wirkt**
+  (Log: „adding N remote candidate(s) buffered before the ICE agent existed“), reicht aber nicht: ICE geht Checking → Failed
+  nach ~12 s. Debug-Log: lokale Kandidaten `host 172.16.80.155:51820` + `srflx 84.136.219.81:2033`; remote vom Exit-Node
+  `host/srflx 82.165.153.21:51820`, von netbird-mgmt `host 172.16.10.17:51820` + `srflx 84.136.219.81:16288` (gleicher
+  Telekom-Anschluss wie der Opal ⇒ Hairpin-NAT nötig, separates Thema).
+- Patch 2 `fwmark-probe-timeout`: `CheckFwmarkSupport()` dialt UDP 127.0.0.1:9 mit **100 ms** Timeout; auf dem Opal
+  „failed to dial with fwmark: i/o timeout“ ⇒ „legacy routing“. In legacy routing fehlt die fwmark-Umgehung des Tunnels,
+  d. h. mit gewähltem Exit-Node (0.0.0.0/1 + 128.0.0.0/1 via wt0) laufen NetBirds eigene ICE-Prüfpakete zum Exit-Node in
+  den Tunnel ⇒ ICE kann nicht klappen. Timeout auf 3 s erhöht. Build 2 (md5 4069bc3c…) hochgeladen; Dienst war vom Nutzer
+  deaktiviert (enabled=0), Test steht aus: nach Einschalten im Log „system supports advanced routing“ erwarten, dann
+  `ip rule` mit fwmark-Regeln und Peer `relayed=false`.
+- Nebenbefund Debug-Log: `udpmux: No decoder for layer type DNS` (Raw-Socket-Mux sieht DNS-Pakete) und
+  `ice_monitor: wait for gathering timed out` — beobachten.

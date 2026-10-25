@@ -1,0 +1,25 @@
+diff --git a/client/net/env_linux.go b/client/net/env_linux.go
+index 82d9a74..5ae1f10 100644
+--- a/client/net/env_linux.go
++++ b/client/net/env_linux.go
+@@ -81,7 +81,10 @@ func CheckFwmarkSupport() bool {
+ 	}()
+ 
+ 	dialer := NewDialer()
+-	dialer.Timeout = 100 * time.Millisecond
++	// 100 ms was too short for slow routers (e.g. 500 BogoMIPS MIPS boxes
++	// starting the daemon under memory pressure): the probe timed out and the
++	// client silently fell back to legacy routing although fwmarks work.
++	dialer.Timeout = 3 * time.Second
+ 
+ 	conn, err := dialer.Dial("udp", "127.0.0.1:9")
+ 	if err != nil {
+@@ -95,7 +98,7 @@ func CheckFwmarkSupport() bool {
+ 		}
+ 	}()
+ 
+-	if err := conn.SetWriteDeadline(time.Now().Add(time.Millisecond * 100)); err != nil {
++	if err := conn.SetWriteDeadline(time.Now().Add(time.Second * 3)); err != nil {
+ 		log.Warnf("failed to set write deadline: %v", err)
+ 		return false
+ 	}
