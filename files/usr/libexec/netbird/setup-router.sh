@@ -240,6 +240,7 @@ do_uninstall() {
         echo ">> netbird-glinet is an opkg package here — removing it with opkg"
         opkg remove netbird-glinet || warn "opkg remove failed"
         if [ "$PURGE" = 1 ]; then rm -rf /etc/netbird /etc/config/netbird; echo ">> purged enrollment + config"; fi
+        swap_hint
         return 0
     fi
     echo ">> stopping service"
@@ -264,6 +265,10 @@ do_uninstall() {
     rm -f /tmp/dnsmasq.d/netbird.conf /etc/resolv.conf.original.netbird "$RPC_MD5_STATE" \
           /etc/config/netbird.pre-opkg "$BIN"
     rm -rf /var/run/netbird /var/log/netbird /usr/bin/.netbird-fetch
+    # files a newer install.sh may have pushed on top of an older package (opkg
+    # only removes what its own file list knows); harmless when already gone
+    rm -f /etc/hotplug.d/block/90-netbird-swap /etc/sysctl.d/90-netbird.conf
+    rmdir /usr/libexec/netbird /usr/share/netbird-glinet 2>/dev/null
     [ -L /var/lib/netbird ] && rm -f /var/lib/netbird
     if [ "$PURGE" = 1 ]; then
         rm -rf /etc/netbird /etc/config/netbird
@@ -273,7 +278,19 @@ do_uninstall() {
     fi
     /etc/init.d/dnsmasq reload >/dev/null 2>&1 || true
     nginx_restart_later
+    swap_hint
     echo ">> done (nginx restarts in a few seconds)"
+}
+
+# The swap file from netbird-setup-swap is deliberately not removed here (it
+# is a system-level choice, not a package file). Say so when one is active.
+swap_hint() {
+    local f
+    for f in $(awk 'NR>1 && /netbird\.swap/ {print $1}' /proc/swaps 2>/dev/null); do
+        echo ">> NOTE: NetBird swap is still active: $f"
+        echo "   remove it with: swapoff $f && rm $f  — and delete its 'config swap' section in /etc/config/fstab"
+    done
+    return 0
 }
 
 case "$CMD" in

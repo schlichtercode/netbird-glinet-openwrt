@@ -16,17 +16,17 @@ No computer, no SSH: the router installs NetBird itself from this project's pack
 
 **1. Add the package source**
 
-In the admin panel open *Applications → Plug-ins* (German panel: *Anwendungen → Softwarepakete*), open the package *Sources* and add this line:
+In the admin panel open *Applications → Plug-ins* (German panel: *Anwendungen → Softwarepakete*), click *Manage sources* (*Quellen verwalten*) and add this line:
 
 ```
 src/gz netbird_glinet https://schlichtercode.github.io/netbird-glinet-openwrt
 ```
 
-Save, then click *Update* so the router fetches the package list.
+Save, then click *Reload* (*Neuladen*) so the router fetches the package list.
 
 **2. Install the package**
 
-Search for `netbird-glinet` and click *Install*. The package is tiny; during the install the router downloads the NetBird program (about 46 MB) from GitHub and writes it to flash. On a MIPS router this takes two to four minutes, so leave the page open. If the panel stops waiting before it is done, the install still finishes in the background. Open the panel's VPN section after a few minutes.
+Search for `netbird-glinet` (shown with its version and size) and click *Install*. The package is tiny; during the install the router downloads the NetBird program (about 46 MB) from GitHub and writes it to flash. On a MIPS router this takes two to four minutes, so leave the page open. If the panel stops waiting before it is done, the install still finishes in the background. Open the panel's VPN section after a few minutes.
 
 On a 128 MB router the VPN, if it was already running, may drop for two minutes during this step: the memory guard pauses NetBird while the package manager works and brings it back by itself.
 
@@ -207,6 +207,20 @@ curl -s -X POST -d '{}' http://127.0.0.1:18090/daemon.DaemonService/Status   # r
 ```
 
 Installed from the opkg feed? `opkg remove netbird-glinet` does the same (its `prerm` runs `setup-router.sh uninstall`); `uninstall.sh` detects that case and calls opkg for you.
+
+### Complete removal
+
+Uninstalling (panel, `opkg remove` or `uninstall.sh`) stops the service, tears down the tunnel, the firewall zone and the NETBIRD chains, restores GL's `vpn-client` object, dashboard bundle and switch handler, and deletes the package files and the NetBird binary. Three things are left on purpose:
+
+1. **Swap on the USB stick** (if you ran `netbird-setup-swap`). Remove it *before* uninstalling, while the helper still exists:
+   ```bash
+   netbird-setup-swap --remove      # swapoff, deletes the file and the fstab entry
+   ```
+   Afterwards by hand: `swapoff /mnt/sda1/netbird.swap && rm /mnt/sda1/netbird.swap && uci delete fstab.@swap[0] && uci commit fstab`. The uninstall prints a reminder when a NetBird swap is still active.
+2. **Enrollment and settings**: `/etc/netbird/` and `/etc/config/netbird`, so a reinstall connects without a new setup key. `rm -rf /etc/netbird /etc/config/netbird` (or `uninstall.sh --purge`).
+3. **Running kernel values** from `/etc/sysctl.d/90-netbird.conf` (`vm.overcommit_memory=1`, `vm.swappiness`, TCP keepalive) stay until the next reboot; the file itself is removed, so GL's defaults return after a restart.
+
+The switch function "VPN client" under *System → Toggle Button Settings* is your setting and is not touched.
 
 ## Repository layout
 
