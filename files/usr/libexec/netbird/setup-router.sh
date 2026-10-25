@@ -265,6 +265,10 @@ do_uninstall() {
     rm -f /tmp/dnsmasq.d/netbird.conf /etc/resolv.conf.original.netbird "$RPC_MD5_STATE" \
           /etc/config/netbird.pre-opkg "$BIN"
     rm -rf /var/run/netbird /var/log/netbird /usr/bin/.netbird-fetch
+    # files a newer install.sh may have pushed on top of an older package (opkg
+    # only removes what its own file list knows); harmless when already gone
+    rm -f /etc/hotplug.d/block/90-netbird-swap /etc/sysctl.d/90-netbird.conf
+    rmdir /usr/libexec/netbird /usr/share/netbird-glinet 2>/dev/null
     [ -L /var/lib/netbird ] && rm -f /var/lib/netbird
     if [ "$PURGE" = 1 ]; then
         rm -rf /etc/netbird /etc/config/netbird

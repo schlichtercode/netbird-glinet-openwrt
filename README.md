@@ -16,17 +16,17 @@ No computer, no SSH: the router installs NetBird itself from this project's pack
 
 **1. Add the package source**
 
-In the admin panel open *Applications → Plug-ins* (German panel: *Anwendungen → Softwarepakete*), open the package *Sources* and add this line:
+In the admin panel open *Applications → Plug-ins* (German panel: *Anwendungen → Softwarepakete*), click *Manage sources* (*Quellen verwalten*) and add this line:
 
 ```
 src/gz netbird_glinet https://schlichtercode.github.io/netbird-glinet-openwrt
 ```
 
-Save, then click *Update* so the router fetches the package list.
+Save, then click *Reload* (*Neuladen*) so the router fetches the package list.
 
 **2. Install the package**
 
-Search for `netbird-glinet` and click *Install*. The package is tiny; during the install the router downloads the NetBird program (about 46 MB) from GitHub and writes it to flash. On a MIPS router this takes two to four minutes, so leave the page open. If the panel stops waiting before it is done, the install still finishes in the background. Open the panel's VPN section after a few minutes.
+Search for `netbird-glinet` (shown with its version and size) and click *Install*. The package is tiny; during the install the router downloads the NetBird program (about 46 MB) from GitHub and writes it to flash. On a MIPS router this takes two to four minutes, so leave the page open. If the panel stops waiting before it is done, the install still finishes in the background. Open the panel's VPN section after a few minutes.
 
 On a 128 MB router the VPN, if it was already running, may drop for two minutes during this step: the memory guard pauses NetBird while the package manager works and brings it back by itself.
 
