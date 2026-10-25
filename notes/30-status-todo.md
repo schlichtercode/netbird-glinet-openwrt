@@ -216,3 +216,16 @@
   `nb_tunnel_teardown` in `stop_service` (nur wenn kein Daemon lebt: `ip link del wt0`, NetBird-ip-rules, NETBIRD-Chains).
   Getestet: No-op-Pfade (Swap aktiv, Daemon lebt). **Echter Test des Hotplug-Pfads = nächster Reboot.**
 - Sperren-Fix griff real: 03:31:30 „breaking stale status lock (34s old)“.
+
+## Komplette Entfernung vom Opal (2026-10-25 12:20–12:40)
+- Nutzer: `netbird-setup-swap --remove` (swapoff, Datei, fstab) → Deinstallation über die GL-Paketseite (prerm `remove`).
+  Read-only geprüft: Paket weg, Binary weg (Flash 81,7 MB frei), kein Tunnel/Regeln/Chains/Zone, GL-Originale zurück, nginx ok.
+  Reste aus der Mischung „Paket 0.1.0-1 + später install.sh“: zwei leere Verzeichnisse und `/etc/hotplug.d/block/90-netbird-swap`
+  (nicht in der Dateiliste des alten Pakets) → manuell entfernt; `setup-router.sh uninstall` räumt diese Dateien jetzt
+  auch im `--keep-files`-Modus mit ab (Commit 9c80f20).
+- Danach auf Wunsch `/etc/netbird` und `/etc/config/netbird` gelöscht ⇒ Router ohne jede NetBird-Spur; nur die
+  sysctl-Laufzeitwerte (`overcommit_memory=1`, `swappiness=100`) bleiben bis zum Reboot.
+- Opal-LAN ist jetzt 172.16.210.0/24 (Router 172.16.210.254); SSH-Key `~/.ssh/id_rsa_glinet` muss für die neue Adresse
+  explizit angegeben werden (`-i`), die ssh-config kennt nur 192.168.8.1.
+- Im NetBird-Dashboard existiert der Peer „GL-SFT1200“ weiter (offline) — dort manuell löschen, wenn nicht mehr gebraucht.
+- README: Bezeichnungen der GL-Paketseite übernommen (Quellen verwalten, Neuladen, installieren); Abschnitt „Complete removal“.
