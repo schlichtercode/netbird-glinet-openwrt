@@ -215,6 +215,8 @@ install.sh / uninstall.sh      run on your computer, talk to the router over SSH
 packaging/build.sh             builds the opkg package netbird-glinet_<ver>_all.ipk + Packages index (no SDK)
 packaging/check.sh             validates a built feed directory (unpacks the .ipk, checks the index)
 packaging/ipkg/                preinst / postinst / prerm / postrm of the package (thin wrappers around setup-router.sh)
+packaging/build-netbird.sh     builds a patched NetBird binary for the router (patches in packaging/patches/)
+docs/upstream-netbird-issues.md  bug-report drafts for the two NetBird client bugs the patches fix
 .github/workflows/feed.yml     on tag v*: build, publish the feed to GitHub Pages, attach the .ipk to the release
 files/                         1:1 image of what lands on the router
   etc/init.d/netbird           procd service (daemon + watchdog instances)
