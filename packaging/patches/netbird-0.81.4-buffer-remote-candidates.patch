@@ -1,0 +1,76 @@
+diff --git a/client/internal/peer/worker_ice.go b/client/internal/peer/worker_ice.go
+index 5979e9b..0776412 100644
+--- a/client/internal/peer/worker_ice.go
++++ b/client/internal/peer/worker_ice.go
+@@ -20,6 +20,10 @@ import (
+ 	"github.com/netbirdio/netbird/route"
+ )
+ 
++// maxPendingCandidates bounds the buffer of remote candidates kept while no
++// ICE agent exists yet (a session rarely produces more than a dozen).
++const maxPendingCandidates = 64
++
+ type ICEConnInfo struct {
+ 	RemoteConn                 net.Conn
+ 	RosenpassPubKey            []byte
+@@ -59,6 +63,14 @@ type WorkerICE struct {
+ 	localUfrag string
+ 	localPwd   string
+ 
++	// pendingCandidates holds remote candidates that arrived before the ICE
++	// agent existed. The signal client dispatches candidate messages directly,
++	// while the offer/answer that creates the agent goes through the
++	// handshaker goroutine; on slow hosts (e.g. 500 BogoMIPS MIPS routers)
++	// the candidates regularly overtake the offer and were dropped, so ICE
++	// never found a pair and the connection stayed on the relay forever.
++	pendingCandidates []ice.Candidate
++
+ 	// we record the last known state of the ICE agent to avoid duplicate on disconnected events
+ 	lastKnownState ice.ConnectionState
+ 
+@@ -151,6 +163,14 @@ func (w *WorkerICE) OnNewOffer(remoteOfferAnswer *OfferAnswer) {
+ 		w.remoteSessionID = ""
+ 	}
+ 
++	if n := len(w.pendingCandidates); n > 0 {
++		w.log.Infof("adding %d remote candidate(s) buffered before the ICE agent existed", n)
++		for _, c := range w.pendingCandidates {
++			w.addRemoteCandidate(c)
++		}
++		w.pendingCandidates = nil
++	}
++
+ 	// Capture the cancel func at spawn time: connect reads it from the argument
+ 	// instead of the field, which a newer OnNewOffer may already have replaced.
+ 	go w.connect(dialerCtx, dialerCancel, agent, remoteOfferAnswer)
+@@ -162,10 +182,21 @@ func (w *WorkerICE) OnRemoteCandidate(candidate ice.Candidate, haRoutes route.HA
+ 	defer w.muxAgent.Unlock()
+ 	w.log.Debugf("OnRemoteCandidate from peer %s -> %s", w.config.Key, candidate.String())
+ 	if w.agent == nil {
+-		w.log.Warnf("ICE Agent is not initialized yet")
++		if len(w.pendingCandidates) >= maxPendingCandidates {
++			w.log.Warnf("ICE Agent is not initialized yet, dropping remote candidate (buffer full)")
++			return
++		}
++		w.pendingCandidates = append(w.pendingCandidates, candidate)
++		w.log.Debugf("ICE Agent is not initialized yet, buffered remote candidate (%d pending)", len(w.pendingCandidates))
+ 		return
+ 	}
+ 
++	w.addRemoteCandidate(candidate)
++}
++
++// addRemoteCandidate hands a remote candidate to the agent. Caller must hold
++// muxAgent and w.agent must not be nil.
++func (w *WorkerICE) addRemoteCandidate(candidate ice.Candidate) {
+ 	if err := w.agent.AddRemoteCandidate(candidate); err != nil {
+ 		w.log.Errorf("error while handling remote candidate")
+ 		return
+@@ -215,6 +246,7 @@ func (w *WorkerICE) Close() {
+ 	// (closeAgent finds a nil agent), so the flags must be dropped here too or
+ 	// the reconnection guard reads the stale state as Connected forever.
+ 	w.abandonNegotiation()
++	w.pendingCandidates = nil
+ }
+ 
+ func (w *WorkerICE) reCreateAgent(dialerCancel context.CancelFunc, candidates []ice.CandidateType) (*icemaker.ThreadSafeAgent, error) {

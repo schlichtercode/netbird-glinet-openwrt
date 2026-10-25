@@ -85,8 +85,10 @@ sh packaging/check.sh build/feed # unpack + validate without a router
 
 The version comes from the git tag (`v1.2.3` → `1.2.3-1`; untagged builds get `<tag>+N.g<sha>-1`).
 Releasing: `git tag v1.2.3 && git push origin v1.2.3`. The workflow `.github/workflows/feed.yml`
-builds the package, publishes `build/feed/` to GitHub Pages (repository setting
-*Pages → Source: GitHub Actions* must be on once) and attaches the `.ipk` to the GitHub release.
+builds the package, publishes `build/feed/` to GitHub Pages and attaches the `.ipk` to the GitHub release.
+Two one-time repository settings: *Pages → Source: GitHub Actions*, and a tag rule `v*` under
+*Environments → github-pages → Deployment branches and tags* (otherwise the deploy job is rejected,
+because the environment only allows `main` by default).
 Feed URL: `https://schlichtercode.github.io/netbird-glinet-openwrt`.
 
 To test a build on a router without the feed: `scp build/feed/*.ipk root@<router>:/overlay/` (flash, not `/tmp`),

@@ -10,7 +10,7 @@
 # /tmp (RAM); postinst downloads it with /usr/sbin/netbird-fetch-binary.
 #
 # Layout of an OpenWrt .ipk: a gzipped tar with ./debian-binary,
-# ./control.tar.gz (control, conffiles, preinst, postinst, prerm) and
+# ./control.tar.gz (control, conffiles, preinst, postinst, prerm, postrm) and
 # ./data.tar.gz (the file tree). Works with GNU tar (CI) and bsdtar (macOS).
 set -eu
 
@@ -88,8 +88,8 @@ Description: NetBird client integration for GL.iNet routers
  (netbird-fetch-binary) and verified by SHA256 - it is not in this package.
 CONTROL
 echo "/etc/config/netbird" > "$CTRL/conffiles"
-cp "$HERE/ipkg/preinst" "$HERE/ipkg/postinst" "$HERE/ipkg/prerm" "$CTRL/"
-chmod 644 "$CTRL/control" "$CTRL/conffiles"; chmod 755 "$CTRL/preinst" "$CTRL/postinst" "$CTRL/prerm"
+cp "$HERE/ipkg/preinst" "$HERE/ipkg/postinst" "$HERE/ipkg/prerm" "$HERE/ipkg/postrm" "$CTRL/"
+chmod 644 "$CTRL/control" "$CTRL/conffiles"; chmod 755 "$CTRL/preinst" "$CTRL/postinst" "$CTRL/prerm" "$CTRL/postrm"
 tar_pack "$STAGE/control.tar.gz" "$CTRL"
 echo "2.0" > "$STAGE/debian-binary"
 

@@ -1,0 +1,7 @@
+#!/bin/sh
+# netbird-glinet postrm — $1 is "remove" or "upgrade" (opkg)
+[ -n "${IPKG_INSTROOT:-}" ] && exit 0
+[ "${1:-remove}" = remove ] || exit 0
+# opkg deletes the files but leaves the package's directories behind
+rmdir /usr/libexec/netbird /usr/share/netbird-glinet 2>/dev/null
+exit 0
