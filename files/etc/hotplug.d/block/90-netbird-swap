@@ -1,0 +1,14 @@
+#!/bin/sh
+# netbird-glinet-openwrt: activate the swap file from netbird-setup-swap once
+# block-mount has mounted the USB stick. block-mount activates swap files only
+# when they are reachable at boot; a stick mounted by hotplug comes too late,
+# so after a reboot the router ran without swap. Sourced by hotplug-call.
+netbird_swap_hotplug() {
+    [ "$ACTION" = add ] || return 0
+    case "$DEVNAME" in sd*|mmcblk*) ;; *) return 0 ;; esac
+    [ -f /usr/libexec/netbird/common.sh ] || return 0
+    # 10-mount has just mounted the device; give block a moment, then swapon
+    ( sleep 5; . /usr/libexec/netbird/common.sh; nb_swap_ensure ) >/dev/null 2>&1 </dev/null &
+    return 0
+}
+netbird_swap_hotplug

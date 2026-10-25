@@ -14,6 +14,7 @@ LOGIN_WARNED=0
 
 pass() {
     nb_load_config
+    nb_swap_ensure
     [ "$NB_ENABLED" = 1 ] || return 0
 
     # ── Duplicate daemon → full cleanup + procd restart ───────────────────

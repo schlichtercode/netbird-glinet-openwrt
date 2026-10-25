@@ -198,3 +198,21 @@
   senken oder Guard auf `MemAvailable + SwapFree`-Logik umstellen; `swappiness` ggf. auf 80–100.
 - Zum Auslagern von nginx: keine cgroups im Kernel, keine Prozess-Zuweisung möglich; LRU erledigt es bei Inaktivität.
   Alternative ohne Stick wäre zram (`kmod-zram`, `zram-swap` im GL-Feed vorhanden), kostet CPU.
+
+## Reboot um 02:48, OOM-Kill, Rest-Tunnel ohne Daemon (2026-10-25 03:15–03:40)
+- Opal rebootete ~02:48 CET (Ursache unbekannt, Verbindung zum Mac riss gleichzeitig ab; davor `wdt_error … not feed wdt`).
+  **Nach dem Reboot war der Swap nicht aktiv** (SwapTotal 0): block-mount aktiviert eine Swap-*Datei* nur, wenn der Stick
+  beim `block mount` der fstab-Init schon gemountet ist; der Stick kommt per Hotplug später.
+- 03:18:46 Kernel-OOM-Kill von NetBird (SIGKILL) bei 4 parallelen `opkg`-Prozessen der GL-Paketseite (Upgrade auf 0.1.1-1
+  erneut nicht durchgelaufen). 03:19:03 Aktion „stop“ (Panel/Dashboard) ⇒ enabled=0.
+- **Befund:** Ohne Daemon tunnelte der Kernel weiter: `wt0` UP, beide WG-Peers mit frischen Handshakes (254 MB Transfer),
+  Tabelle `netbird` + ip rules 105/110 vorhanden ⇒ Mac (jetzt am Opal-LAN) ging über den Exit-Node, Speedtest 49,7/34,4
+  Mbit/s (P2P + LAN), Panel sagte korrekt „Deaktiviert“. SIGKILL lässt NetBird nichts aufräumen; unser `stop_service`
+  räumte nur DNS/resolv.
+- 03:21 Swap wieder aktiv (Stick umgesteckt/hotplug). 03:30 NetBird per `uci enabled=1` + start reaktiviert: Daemon übernahm
+  das vorhandene wt0 nahtlos (advanced routing, beide Peers „connection succeeded“, Panel Verbunden/P2P).
+- **Fixes (03:35 eingespielt, Commit folgt):** `nb_swap_ensure` (fstab-Swap-Einträge aktivieren, falls Datei da und nicht
+  in /proc/swaps) in `start_service`, Watchdog-`pass` und neuem `/etc/hotplug.d/block/90-netbird-swap`;
+  `nb_tunnel_teardown` in `stop_service` (nur wenn kein Daemon lebt: `ip link del wt0`, NetBird-ip-rules, NETBIRD-Chains).
+  Getestet: No-op-Pfade (Swap aktiv, Daemon lebt). **Echter Test des Hotplug-Pfads = nächster Reboot.**
+- Sperren-Fix griff real: 03:31:30 „breaking stale status lock (34s old)“.

@@ -183,6 +183,55 @@ nb_procd_stop_instances() {
     return 0
 }
 
+# ── Swap on a USB stick (netbird-setup-swap) ─────────────────────────────────
+# block-mount does not activate a swap *file* whose stick is mounted by
+# hotplug after boot, so the router came up without swap. Activate every
+# enabled fstab swap entry that exists and is not active yet. Called from the
+# init script, the watchdog pass and /etc/hotplug.d/block/90-netbird-swap.
+nb_swap_ensure() {
+    local i=0 dev en
+    while uci -q get "fstab.@swap[$i]" >/dev/null 2>&1; do
+        dev=$(uci -q get "fstab.@swap[$i].device"); en=$(uci -q get "fstab.@swap[$i].enabled")
+        i=$((i + 1))
+        [ "$en" = 0 ] && continue
+        [ -n "$dev" ] && [ -f "$dev" ] || continue
+        grep -q "^$dev " /proc/swaps 2>/dev/null && continue
+        swapon "$dev" 2>/dev/null && nb_log "swap activated: $dev ($(nb_swap_free_kb)kB free)"
+    done
+    return 0
+}
+
+# ── Tunnel teardown when the daemon could not do it ──────────────────────────
+# After an OOM kill (SIGKILL) nothing cleans up: wt0, its WireGuard peers, the
+# routes and NetBird's ip rules stay in the kernel and keep tunnelling traffic
+# although the service is "stopped" (seen on the Opal, 2026-10-25). Remove
+# them so that stop means stop. Only acts when no daemon is alive — a live
+# daemon tears down its own interface on SIGTERM.
+nb_tunnel_teardown() {
+    [ "$(nb_daemon_count)" -eq 0 ] || return 0
+    [ -d /sys/class/net/wt0 ] || return 0
+    nb_log "removing orphaned wt0 (daemon gone without cleanup)"
+    ip link del wt0 2>/dev/null
+    ip rule show 2>/dev/null | grep -E 'fwmark 0x1bd|lookup netbird|suppress_prefixlength' | sed 's/^[0-9]*:[[:space:]]*//' | \
+        while IFS= read -r rule; do
+            # shellcheck disable=SC2086
+            ip rule del $rule 2>/dev/null || true
+        done
+    local tbl
+    for tbl in filter nat mangle raw; do
+        iptables-save -t "$tbl" 2>/dev/null | grep -E '^-A.+-j NETBIRD' | sed 's/^-A/-D/' | \
+            while IFS= read -r rule; do
+                # shellcheck disable=SC2086
+                iptables -t "$tbl" $rule 2>/dev/null || true
+            done
+        iptables-save -t "$tbl" 2>/dev/null | grep '^:NETBIRD' | cut -d' ' -f1 | tr -d ':' | \
+            while IFS= read -r chain; do
+                iptables -t "$tbl" -F "$chain" 2>/dev/null; iptables -t "$tbl" -X "$chain" 2>/dev/null
+            done
+    done
+    return 0
+}
+
 nb_prepare_dirs() {
     mkdir -p "$NB_STATE" "$NB_LOG_DIR" "$NB_RUN" /var/lib
     # /var -> /tmp on OpenWrt: keep config + WireGuard keys on the overlay.
