@@ -208,6 +208,20 @@ curl -s -X POST -d '{}' http://127.0.0.1:18090/daemon.DaemonService/Status   # r
 
 Installed from the opkg feed? `opkg remove netbird-glinet` does the same (its `prerm` runs `setup-router.sh uninstall`); `uninstall.sh` detects that case and calls opkg for you.
 
+### Complete removal
+
+Uninstalling (panel, `opkg remove` or `uninstall.sh`) stops the service, tears down the tunnel, the firewall zone and the NETBIRD chains, restores GL's `vpn-client` object, dashboard bundle and switch handler, and deletes the package files and the NetBird binary. Three things are left on purpose:
+
+1. **Swap on the USB stick** (if you ran `netbird-setup-swap`). Remove it *before* uninstalling, while the helper still exists:
+   ```bash
+   netbird-setup-swap --remove      # swapoff, deletes the file and the fstab entry
+   ```
+   Afterwards by hand: `swapoff /mnt/sda1/netbird.swap && rm /mnt/sda1/netbird.swap && uci delete fstab.@swap[0] && uci commit fstab`. The uninstall prints a reminder when a NetBird swap is still active.
+2. **Enrollment and settings**: `/etc/netbird/` and `/etc/config/netbird`, so a reinstall connects without a new setup key. `rm -rf /etc/netbird /etc/config/netbird` (or `uninstall.sh --purge`).
+3. **Running kernel values** from `/etc/sysctl.d/90-netbird.conf` (`vm.overcommit_memory=1`, `vm.swappiness`, TCP keepalive) stay until the next reboot; the file itself is removed, so GL's defaults return after a restart.
+
+The switch function "VPN client" under *System → Toggle Button Settings* is your setting and is not touched.
+
 ## Repository layout
 
 ```
