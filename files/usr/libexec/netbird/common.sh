@@ -233,9 +233,19 @@ nb_status_json() {
     fi
     [ -S "$NB_SOCK" ] || { rm -f "$cache"; return 1; }
     if ! mkdir "$lock" 2>/dev/null; then
-        # another fetch in flight: serve stale data rather than piling up
-        [ -f "$cache" ] && cat "$cache"
-        return 0
+        # A fetch takes at most ~8 s (curl --max-time). An older lock was left
+        # behind by a killed fetch (procd stopping the watchdog mid-call) and
+        # would black out the panel until reboot: break it.
+        now=$(date +%s); mt=$(date -r "$lock" +%s 2>/dev/null || echo 0)
+        if [ $((now - mt)) -gt 30 ]; then
+            nb_log "breaking stale status lock ($((now - mt))s old)"
+            rmdir "$lock" 2>/dev/null; rm -f "$cache.tmp"
+            mkdir "$lock" 2>/dev/null || { [ -f "$cache" ] && cat "$cache"; return 0; }
+        else
+            # another fetch in flight: serve stale data rather than piling up
+            [ -f "$cache" ] && cat "$cache"
+            return 0
+        fi
     fi
     if [ "$NB_JSON_SOCKET" = 1 ]; then
         # gateway only: if it does not answer the daemon is still starting —
@@ -269,7 +279,7 @@ nb_status_field() {
         io.write(tostring(v))' 2>/dev/null
 }
 
-nb_invalidate_status() { rm -f "$NB_RUN/status.json"; }
+nb_invalidate_status() { rm -f "$NB_RUN/status.json" "$NB_RUN/status.json.tmp"; rmdir "$NB_RUN/status.lock" 2>/dev/null; }
 
 # RSS of the daemon in kB (empty if not running).
 nb_daemon_rss_kb() {
