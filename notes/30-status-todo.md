@@ -188,7 +188,12 @@
   Swap nicht. FAT ignoriert chmod 600 (Datei bleibt 777) — unkritisch.
 - MemAvailable ändert sich durch Swap nicht (11–13 MB); Entlastung kommt erst, wenn der Kernel inaktive Seiten (nginx-
   Worker bei geschlossenem Panel) auslagert. `vm.swappiness` = 60 (Default).
-- **Offen:** Memory Guard (`nb_mem_guard`, Schwelle `mem_min_kb` 9216) ist nicht swap-bewusst — er stoppt NetBird bei
+- **Erledigt (03:15):** Guard swap-bewusst — `nb_mem_guard_threshold_kb`: bei SwapFree ≥ 64 MB halbiert sich `mem_min_kb`
+  (9216 → 4608), Log-Zeile des Watchdogs zeigt `swap_used=` und `guard_min=`; `vm.swappiness=80` in
+  `/etc/sysctl.d/90-netbird.conf`. Per `install.sh --skip-binary` eingespielt. Dabei feuerte der Guard noch einmal mit der
+  alten Schwelle (Datei-Push drückte MemAvailable auf 9,1 MB), Cooldown 101 s, danach Daemon Connected, ~9 MB im Swap.
+  Router-Uhr läuft auf CET (UTC+1), client.log in UTC, Mac in CEST — bei Log-Vergleichen beachten.
+- (alt) Memory Guard (`nb_mem_guard`, Schwelle `mem_min_kb` 9216) war nicht swap-bewusst — er stoppt NetBird bei
   MemAvailable < 9 MB, obwohl der Kernel jetzt auslagern könnte. Vorschlag: bei SwapFree > 64 MB Schwelle auf ~4 MB
   senken oder Guard auf `MemAvailable + SwapFree`-Logik umstellen; `swappiness` ggf. auf 80–100.
 - Zum Auslagern von nginx: keine cgroups im Kernel, keine Prozess-Zuweisung möglich; LRU erledigt es bei Inaktivität.

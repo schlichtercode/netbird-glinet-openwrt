@@ -98,12 +98,22 @@ nb_timeout() {
 # to thrash (page cache of the 46 MB binary gets evicted, everything lands in
 # D state, SSH dies). Kill the daemon now, let run-daemon.sh wait mem_cooldown
 # seconds before procd's respawn brings it back. Returns 0 if it fired.
+# With swap (USB stick, netbird-setup-swap) the kernel can page out idle
+# memory (nginx workers) instead of thrashing, so the guard may wait longer:
+# while at least 64 MB of swap is free the threshold is halved.
+nb_swap_free_kb() { awk '/SwapFree/{print $2}' /proc/meminfo; }
+nb_mem_guard_threshold_kb() {
+    local min="${NB_MEM_MIN_KB:-9216}" swap
+    swap=$(nb_swap_free_kb)
+    [ -n "$swap" ] && [ "$swap" -ge 65536 ] && min=$((min / 2))
+    echo "$min"
+}
 nb_mem_guard() {
-    local avail
-    avail=$(nb_mem_available_kb)
-    [ -n "$avail" ] && [ "$avail" -lt "${NB_MEM_MIN_KB:-9216}" ] || return 1
+    local avail min
+    avail=$(nb_mem_available_kb); min=$(nb_mem_guard_threshold_kb)
+    [ -n "$avail" ] && [ "$avail" -lt "$min" ] || return 1
     [ "$(nb_daemon_count)" -gt 0 ] || return 1
-    nb_log "MEMORY GUARD: MemAvailable=${avail}kB < ${NB_MEM_MIN_KB}kB — stopping daemon (rss=$(nb_daemon_rss_kb)kB), cooldown ${NB_MEM_COOLDOWN}s"
+    nb_log "MEMORY GUARD: MemAvailable=${avail}kB < ${min}kB (swap free $(nb_swap_free_kb)kB) — stopping daemon (rss=$(nb_daemon_rss_kb)kB), cooldown ${NB_MEM_COOLDOWN}s"
     mkdir -p "$NB_RUN"
     echo $(( $(date +%s) + NB_MEM_COOLDOWN )) > "$NB_RUN/hold-until"
     nb_kill_daemon 10

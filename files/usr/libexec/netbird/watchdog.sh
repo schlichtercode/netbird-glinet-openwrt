@@ -77,7 +77,9 @@ pass() {
     fi
 
     # ── Memory telemetry (logread) ────────────────────────────────────────
-    nb_log "mgmt=$state wg=$(nb_wg_mode) rss=$(nb_daemon_rss_kb)kB mem_avail=$(nb_mem_available_kb)kB"
+    local swap_total swap_used
+    swap_total=$(awk '/SwapTotal/{print $2}' /proc/meminfo); swap_used=$(( ${swap_total:-0} - $(nb_swap_free_kb) ))
+    nb_log "mgmt=$state wg=$(nb_wg_mode) rss=$(nb_daemon_rss_kb)kB mem_avail=$(nb_mem_available_kb)kB swap_used=${swap_used}kB guard_min=$(nb_mem_guard_threshold_kb)kB"
 }
 
 # Daemon liveness, checked every 10 s. procd on GL 4.8.3 can silently lose an
