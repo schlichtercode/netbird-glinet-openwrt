@@ -163,3 +163,16 @@
   `ip rule` mit fwmark-Regeln und Peer `relayed=false`.
 - Nebenbefund Debug-Log: `udpmux: No decoder for layer type DNS` (Raw-Socket-Mux sieht DNS-Pakete) und
   `ice_monitor: wait for gathering timed out` — beobachten.
+
+### Ergebnis Build 2 (2026-10-25 02:35–02:45): **P2P steht**
+- Nach Einschalten: „system supports advanced routing“, `ip rule` 105 (`main suppress_prefixlength 0`) + 110
+  (`not fwmark 0x1bd00 lookup netbird`), Routen in Tabelle `netbird` (`default dev wt0`, `172.16.10.0/24`). ICE:
+  „connection succeeded“, WG-Endpunkte direkt `82.165.153.21:51820` (Exit-Node) und `172.16.10.17:51820` (netbird-mgmt,
+  über das Heimnetz erreichbar), Handshake nach 0,7 s. Panel: Verbunden, Peers 2/2 **P2P**, 53 ms / 86 ms.
+- Zwischenfall: Panel blieb auf „Verbinde…“ — verwaiste `/var/run/netbird/status.lock` (procd hatte beim Debug-Neustart
+  die Watchdog-Instanz mitten in `nb_status_json` beendet; `rmdir` lief nie) ⇒ jede Abfrage lieferte „stale data“ ohne
+  Cache. Fix f9aa171: Sperre älter als 30 s wird gebrochen, `nb_invalidate_status` räumt sie mit. Ohne Neustart eingespielt.
+- Fehlschluss korrigiert: der Mac am Opal-LAN ging per WLAN (`en0`, 172.16.11.x) direkt ins Heimnetz, nicht über den Opal;
+  Traceroute 1. Hop 172.16.11.254. Routing über den Exit-Node vom Router aus ist korrekt (Public IP 82.165.153.21).
+- Daemon-CPU im Leerlauf 39 % eines Kerns (GOMEMLIMIT=32MiB bei 22 MB RSS ⇒ GC-Druck?) — Kandidat für Tuning, RAM ist knapp.
+- Beide Patches gehören upstream gemeldet: (1) Remote-Kandidaten puffern, (2) fwmark-Probe-Timeout 100 ms → länger.
